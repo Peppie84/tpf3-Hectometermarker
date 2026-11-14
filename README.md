@@ -32,6 +32,10 @@ Kilometer- und Hektometertafeln für Bahngleise in Transport Fever 3: als Stein 
 - **Meter-genaue Angaben**
   Bei den Tafeln lässt sich zusätzlich eine zweistellige Meteranzeige unten rechts einblenden.
 
+### Hinweis zur KI Nutzung
+Bei einzelnen kleineren Teilbereichen der Entwicklung (z. B. Code-Hilfe oder Textformulierung) kam unterstützend KI (Microsoft Copilot) zum Einsatz. Das Titelbild (basierend auf einem eigenen Screenshot) sowie das Logo wurden mithilfe von ChatGPT erstellt.
+
+
 ### Fehler melden
 
 Bugs oder Features können auf GitHub oder Mod.io gemeldet werden.
@@ -62,6 +66,9 @@ Kilometre and hectometre markers for railway tracks in Transport Fever 3: as a s
   A minus can be chosen as the first digit, for example for lines with negative kilometrage. Auto placement keeps counting with it, too.
 - **Metre-exact values**
   On the boards a two-digit metre display can additionally be shown at the bottom right.
+
+### Note on AI Usage
+AI (Microsoft Copilot) was used to provide support for certain minor aspects of the development process (e.g., coding assistance or drafting text). The cover image (based on a screenshot I captured myself) and the logo were created using ChatGPT.
 
 ### Reporting bugs
 
