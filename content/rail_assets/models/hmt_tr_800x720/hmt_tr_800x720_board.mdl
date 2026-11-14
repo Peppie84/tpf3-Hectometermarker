@@ -1,0 +1,35 @@
+function data()
+return { 
+		boundingInfo = { 
+			bbMax = { 0.0584414, 0.36, 2.72487, },
+			bbMin = { 0.0285, -0.36, 1.65, },
+		},
+		collider = { 
+			params = { 
+				halfExtents = { 0.0149707, 0.36, 0.537435, },
+			},
+			transf = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0.0434707, 0, 2.18743, 1, },
+			type = "BOX",
+		},
+		lods = {
+			{ 
+				node = { 
+					children = {
+						{ 
+							materials = { "mat/board.mtl", "mat/rost-stahl.mtl", "mat/plastik-reflektor-white.mtl", "mat/clean-brushed-edelstahl.mtl", },
+							mesh = "msh/board.lod0.asset_lod0.msh",
+							name = "board.lod0.asset",
+							transf = { 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 0.0464443, 0, 2.18736, 1, },
+						},
+					},
+					name = "RootNode",
+					transf = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, },
+				},
+				visibleFrom = 0,
+				visibleTo = 304.961,
+			},
+		},
+		metadata = { },
+		version = 2,
+	}
+end

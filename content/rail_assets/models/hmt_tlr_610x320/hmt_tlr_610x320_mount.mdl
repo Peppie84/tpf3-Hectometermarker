@@ -1,0 +1,35 @@
+function data()
+return { 
+		boundingInfo = { 
+			bbMax = { 0.0584071, 0.460139, 2.54891, },
+			bbMin = { 0.0289547, -0.16, 1.80865, },
+		},
+		collider = { 
+			params = { 
+				halfExtents = { 0.0147262, 0.31007, 0.370133, },
+			},
+			transf = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0.0436809, 0.15007, 2.17878, 1, },
+			type = "BOX",
+		},
+		lods = {
+			{ 
+				node = { 
+					children = {
+						{ 
+							materials = { "mat/clean-brushed-edelstahl.mtl", },
+							mesh = "msh/wall-long320.lod0.asset.deco.mount_lod0.msh",
+							name = "wall-long320.lod0.asset.deco",
+							transf = { 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0.0419785, 0.150053, 2.48228, 1, },
+						},
+					},
+					name = "RootNode",
+					transf = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, },
+				},
+				visibleFrom = 0,
+				visibleTo = 147.529,
+			},
+		},
+		metadata = { },
+		version = 2,
+	}
+end

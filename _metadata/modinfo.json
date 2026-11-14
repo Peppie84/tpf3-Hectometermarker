@@ -1,0 +1,29 @@
+{
+    "authors": [
+        {
+            "name": "Peppie84",
+            "role": "CREATOR"
+        }
+    ],
+    "description": "Platziere Kilometer- und Hektometertafeln neben dem Gleis. Wähle Modell, Ziffern, Abstand zur Gleismitte und Seite, optional doppelseitig. Mit Automatisch setzen verteilt die Mod weitere Tafeln entlang der Strecke und zählt die Hektometer weiter; jede Tafel wird passend benannt.<br><hr><br>Platziere Kilometer- und Hektometertafeln neben dem Gleis. Wähle Modell, Ziffern, Abstand zur Gleismitte und Seite, optional doppelseitig. Mit Automatisch setzen verteilt die Mod weitere Tafeln entlang der Strecke und zählt die Hektometer weiter; jede Tafel wird passend benannt.<br><hr><br>Place kilometre and hectometre markers next to the track. Choose model, digits, distance from the track centre and side, optionally double-sided. With auto placement the mod places further markers along the line, keeps counting the hectometres and names each marker accordingly.",
+    "localization": {
+        "de": {
+            "description": "Platziere Kilometer- und Hektometertafeln neben dem Gleis. Wähle Modell, Ziffern, Abstand zur Gleismitte und Seite, optional doppelseitig. Mit Automatisch setzen verteilt die Mod weitere Tafeln entlang der Strecke und zählt die Hektometer weiter; jede Tafel wird passend benannt.",
+            "name": "Hektometertafeln",
+            "summary": "Kilometer- und Hektometertafeln für Bahngleise, mit automatischem Setzen und Weiterzählen."
+        },
+        "en": {
+            "description": "Place kilometre and hectometre markers next to the track. Choose model, digits, distance from the track centre and side, optionally double-sided. With auto placement the mod places further markers along the line, keeps counting the hectometres and names each marker accordingly.",
+            "name": "Hectometer markers",
+            "summary": "Kilometre and hectometre markers for railway tracks with automatic placement and counting."
+        }
+    },
+    "name": "Hektometertafeln",
+    "summary": "Kilometer- und Hektometertafeln für Bahngleise, mit automatischem Setzen und Weiterzählen.",
+    "tags": [
+        "Signal",
+        "Misc",
+        "Other Asset"
+    ],
+    "url": ""
+}

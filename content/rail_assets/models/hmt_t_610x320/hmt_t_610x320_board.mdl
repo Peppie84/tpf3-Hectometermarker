@@ -1,0 +1,28 @@
+function data()
+return { 
+		boundingInfo = { 
+			bbMax = { 0.0575055, 0.16, 2.7, },
+			bbMin = { 0, -0.16, 1.8, },
+		},
+		lods = {
+			{ 
+				node = { 
+					children = {
+						{ 
+							materials = { "mat/board.mtl", "mat/rost-stahl.mtl", },
+							mesh = "msh/board.lod0.asset_lod0.msh",
+							name = "board.lod0.asset",
+							transf = { 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 0.0469751, 0, 2.17875, 1, },
+						},
+					},
+					name = "RootNode",
+					transf = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, },
+				},
+				visibleFrom = 0,
+				visibleTo = 236.961,
+			},
+		},
+		metadata = { },
+		version = 2,
+	}
+end
