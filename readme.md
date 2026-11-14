@@ -3,7 +3,7 @@
 <div align="center">
 
 [![TransportFever3](https://img.shields.io/badge/TransportFever3-22282E?style=flat-square)](https://www.transportfever3.com/de/)
-[![Mod.io Version](https://img.shields.io/badge/Mod.io-Rev1-07C1D8?style=flat-square)](tpd)
+[![Mod.io Version](https://img.shields.io/badge/Mod.io-Rev1-07C1D8?style=flat-square)]([tpd](https://mod.io/g/transportfever3/m/hektometertafeln#description))
 [![Last commit](https://img.shields.io/github/last-commit/Peppie84/tpf3-Hectometermarker?style=flat-square&color=important)](https://github.com/Peppie84/tpf3-Hectometermarker/commits/development)
 [![GitHub issues](https://img.shields.io/github/issues/Peppie84/tpf3-Hectometermarker?style=flat-square)](https://github.com/Peppie84/tpf3-Hectometermarker/issues)
 [![Top language](https://img.shields.io/github/languages/top/Peppie84/tpf3-Hectometermarker?style=flat-square&color=blueviolet)](https://github.com/search?q=repo%3APeppie84%2Ftpf3-Hectometermarker++language%3ALua&type=code)
