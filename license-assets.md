@@ -5,7 +5,7 @@ Copyright (c) 2026 Dennis Schmitt
 The assets of this mod are licensed under the Creative Commons Attribution 4.0
 International License (CC BY 4.0): models (`.mdl`, `.msh`, `.mtl`), textures,
 icons and images (`.dds`, `.png`) and the other non-code files of this mod.
-The source code (Lua scripts) is licensed under the MIT License, see `LICENSE`.
+The source code (Lua scripts) is licensed under the MIT License, see [license.txt](license.txt).
 
 Summary: <https://creativecommons.org/licenses/by/4.0/>. Attribution: name
 "Dennis Schmitt" as the creator, link the license and indicate if you changed the
