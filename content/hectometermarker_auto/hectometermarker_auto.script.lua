@@ -447,15 +447,15 @@ local function build_proposal(marker_edge_object, base_params, start_value, valu
 	return proposal, context, #edge_objects_to_add, all_params_applied
 end
 
-local function critical_errors(proposal, context)
+local function proposal_errors(proposal, context)
 	local make_proposal_data = api.engine.util.proposal and api.engine.util.proposal.makeProposalData
-	if not make_proposal_data then return nil end
+	if not make_proposal_data then return "proposal validation is unavailable" end
 	local succeeded, proposal_data = pcall(make_proposal_data, proposal, context)
-	if not succeeded or not proposal_data or not proposal_data.errorState or not proposal_data.errorState.critical then return nil end
+	if not succeeded then return "proposal validation failed: " .. tostring(proposal_data) end
+	if not proposal_data or not proposal_data.errorState then return "proposal validation returned no error state" end
 	local messages = {}
-	pcall(function()
-		for _, message in ipairs(proposal_data.errorState.messages) do messages[#messages + 1] = tostring(message) end
-	end)
+	for _, message in ipairs(proposal_data.errorState.messages or {}) do messages[#messages + 1] = tostring(message) end
+	if not proposal_data.errorState.critical and #messages == 0 then return nil end
 	return #messages > 0 and table.concat(messages, ", ") or "unknown error"
 end
 
@@ -490,7 +490,7 @@ local function submit_build_proposal(marker_entity, steps, value_step)
 	local function errors_of_step(step)
 		local step_proposal, step_context = build_proposal(marker_edge_object, base_params, start_value, value_step, { step })
 		if not step_proposal then return "no markers" end
-		return critical_errors(step_proposal, step_context)
+		return proposal_errors(step_proposal, step_context)
 	end
 
 	local buildable_steps = {}
@@ -533,8 +533,58 @@ local function submit_build_proposal(marker_entity, steps, value_step)
 
 	local proposal, context, marker_count, all_params_applied = build_proposal(marker_edge_object, base_params, start_value, value_step, buildable_steps)
 	if not proposal then return end
-	local combined_errors = critical_errors(proposal, context)
-	if combined_errors then log_message("the combined proposal reports: " .. combined_errors) end
+	local combined_errors = proposal_errors(proposal, context)
+	if combined_errors then
+		log_message("combined proposal rejected: " .. combined_errors .. "; filtering colliding markers")
+		local accepted_steps = {}
+		local function steps_with_candidate(candidate)
+			local candidate_steps = {}
+			for _, accepted_step in ipairs(accepted_steps) do
+				candidate_steps[#candidate_steps + 1] = accepted_step
+			end
+			candidate_steps[#candidate_steps + 1] = candidate
+			return candidate_steps
+		end
+		local function errors_of_steps(candidate_steps)
+			local candidate_proposal, candidate_context = build_proposal(marker_edge_object, base_params, start_value, value_step, candidate_steps)
+			if not candidate_proposal then return "no markers" end
+			return proposal_errors(candidate_proposal, candidate_context)
+		end
+
+		for _, step in ipairs(buildable_steps) do
+			if not errors_of_steps(steps_with_candidate(step)) then
+				accepted_steps[#accepted_steps + 1] = step
+			else
+				local kept_positions = {}
+				for _, position in ipairs(step.positions) do
+					local candidate_positions = {}
+					for _, kept_position in ipairs(kept_positions) do
+						candidate_positions[#candidate_positions + 1] = kept_position
+					end
+					candidate_positions[#candidate_positions + 1] = position
+					local candidate_step = step_with_positions(step, candidate_positions)
+					local errors = errors_of_steps(steps_with_candidate(candidate_step))
+					if errors then
+						log_message(string.format("edge %s: marker step %d rejected in combined proposal: %s", tostring(step.edge), position.step_count, errors))
+					else
+						kept_positions[#kept_positions + 1] = position
+					end
+				end
+				if #kept_positions > 0 then
+					accepted_steps[#accepted_steps + 1] = step_with_positions(step, kept_positions)
+				end
+			end
+		end
+
+		buildable_steps = accepted_steps
+		proposal, context, marker_count, all_params_applied = build_proposal(marker_edge_object, base_params, start_value, value_step, buildable_steps)
+		if not proposal then return end
+		combined_errors = proposal_errors(proposal, context)
+		if combined_errors then
+			log_message("combined proposal remains invalid: " .. combined_errors)
+			return
+		end
+	end
 	api.cmd.sendCommand(api.cmd.makeWorldBuildProposalCmd(proposal, context, false, true))
 	log_message("sent " .. marker_count .. " new markers (" .. tostring(marker_edge_object.edgeObjectConstruction) .. ", params set " .. tostring(all_params_applied) .. ")")
 end
