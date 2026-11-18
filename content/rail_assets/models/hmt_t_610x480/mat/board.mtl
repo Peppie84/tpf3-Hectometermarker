@@ -14,8 +14,7 @@ return {
 			map_albedo = { 
 				fragmentSamplers = { 
 					albedoTex = { 
-						fileName = "/rail_assets/textures/texture-2k.dds",
-						maxDegreeOfAnisotropy = nil,
+						fileName = "/rail_assets/textures/texture-1k.dds",
 						type = "TWOD",
 						wrapS = "REPEAT",
 						wrapT = "REPEAT",
@@ -26,7 +25,6 @@ return {
 				fragmentSamplers = { 
 					metalGlossAoTex = { 
 						fileName = "::/placeholders/mat/tex/default_metal_gloss_ao.dds",
-						maxDegreeOfAnisotropy = nil,
 						type = "TWOD",
 						wrapS = "REPEAT",
 						wrapT = "REPEAT",
