@@ -1,6 +1,6 @@
-
 local AUTO_KEY = "peppie84_hmt_auto"
 local SPACING_KEY = "peppie84_hmt_auto_spacing"
+local STOP_AT_KEY = "peppie84_hmt_auto_stop_at"
 local MODEL_KEY = "peppie84_hmt_model_type"
 local FIRST_DIGIT_KEY = "peppie84_hmt_first_digit"
 local SECOND_DIGIT_KEY = "peppie84_hmt_second_digit"
@@ -22,6 +22,16 @@ local NEGATIVE_FIRST_INDEX = 2
 local FIRST_DIGIT_INDEX_OFFSET = 2
 local SPACING_METERS = { 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000 }
 local DEFAULT_SPACING_INDEX = 1
+local STOP_TARGET_SWITCH = 2
+local STOP_TARGET_TUNNEL = 3
+local STOP_TARGET_STATION = 4
+local STOP_TARGET_BRIDGE = 5
+local STOP_TARGET_REASONS = {
+	[STOP_TARGET_SWITCH] = "target switch",
+	[STOP_TARGET_TUNNEL] = "target tunnel",
+	[STOP_TARGET_STATION] = "target station",
+	[STOP_TARGET_BRIDGE] = "target bridge",
+}
 local VALUE_EPSILON = 1e-9
 local TANGENT_TIE_EPSILON = 1e-3
 local MAX_SHIFT_METERS = 15
@@ -38,8 +48,7 @@ local function combo_box_index(raw_value, default_index)
 	return math.floor(index_value)
 end
 
--- Konstruktionen ohne Parameter peppie84_hmt_model_type (rail_assets) legen ihre Fähigkeiten über die vorhandenen Parameter fest:
--- Die Hektometerstelle ist immer peppie84_hmt_hectometer_digit, nur 3-stellige Modelle haben zusätzlich peppie84_hmt_third_digit.
+
 local function is_wide_model(params)
 	if params[MODEL_KEY] == nil then return params[THIRD_DIGIT_KEY] ~= nil end
 	local model_type = combo_box_index(params[MODEL_KEY], 1)
@@ -51,7 +60,6 @@ local function hectometer_digit_key(params)
 	return is_wide_model(params) and WIDE_HECTOMETER_DIGIT_KEY or THIRD_DIGIT_KEY
 end
 
--- Dreistellige Tafeln (mit peppie84_hmt_third_digit) haben bei der zweiten Stelle "keine" als Index 1, die Ziffern 0-9 liegen dort auf Index 2-11.
 local function second_digit_index_offset(params)
 	if params[MODEL_KEY] == nil and params[THIRD_DIGIT_KEY] ~= nil then return 2 end
 	return 1
@@ -155,12 +163,18 @@ local function distance_from_params(params)
 	return SPACING_METERS[spacing_index]
 end
 
-local function is_marker_of_construction(entity, construction)
-	local edge_object = api.engine.getComponent(entity, api.type.ComponentType.EDGE_OBJECT)
-	return edge_object ~= nil and edge_object.edgeObjectConstruction == construction
+local function stop_target_from_params(params)
+	if type(params) ~= "table" then return nil end
+	local stop_target = combo_box_index(params[STOP_AT_KEY], 1)
+	return STOP_TARGET_REASONS[stop_target] and stop_target or nil
 end
 
-local function find_markers_on_edge(edge_entity, construction)
+local function is_hectometer_marker(entity)
+	local edge_object = api.engine.getComponent(entity, api.type.ComponentType.EDGE_OBJECT)
+	return edge_object ~= nil and type(edge_object.params) == "table" and edge_object.params[FIRST_DIGIT_KEY] ~= nil
+end
+
+local function find_markers_on_edge(edge_entity)
 	local transport_network = api.engine.getComponent(edge_entity, api.type.ComponentType.TRANSPORT_NETWORK)
 	local markers_by_entity = {}
 	local total_length = 0
@@ -177,10 +191,10 @@ local function find_markers_on_edge(edge_entity, construction)
 		local reverse_signal = api.engine.system.signalSystem.getSignal(edge_id, true)
 		local forward_signal_entity = forward_signal and forward_signal.entity or -1
 		local reverse_signal_entity = reverse_signal and reverse_signal.entity or -1
-		if forward_signal_entity > 0 and is_marker_of_construction(forward_signal_entity, construction) then
+		if forward_signal_entity > 0 and is_hectometer_marker(forward_signal_entity) then
 			markers_by_entity[forward_signal_entity] = { position = section_range.end_position, is_left = true }
 		end
-		if reverse_signal_entity > 0 and is_marker_of_construction(reverse_signal_entity, construction) then
+		if reverse_signal_entity > 0 and is_hectometer_marker(reverse_signal_entity) then
 			markers_by_entity[reverse_signal_entity] = { position = section_range.start_position, is_left = false }
 		end
 	end
@@ -200,6 +214,14 @@ end
 local function is_station(edge_entity)
 	local succeeded, station_construction = pcall(api.engine.system.streetConnectorSystem.getConstructionEntityForEdge, edge_entity)
 	return succeeded and station_construction ~= nil and station_construction >= 0
+end
+
+local function is_area_target(edge_entity, base_edge, stop_target)
+	local edge_types = api.type.enum.BaseEdgeType
+	if stop_target == STOP_TARGET_TUNNEL then return base_edge.type == edge_types.TUNNEL end
+	if stop_target == STOP_TARGET_BRIDGE then return base_edge.type == edge_types.BRIDGE end
+	if stop_target == STOP_TARGET_STATION then return is_station(edge_entity) end
+	return false
 end
 
 local function planar_direction(tangent, is_inverted)
@@ -259,13 +281,11 @@ local function pick_straightest_edge(candidates, node, last_edge)
 	return best_edge
 end
 
-local function plan_new_markers(marker_entity, distance, max_count)
-	local marker_edge_object = api.engine.getComponent(marker_entity, api.type.ComponentType.EDGE_OBJECT)
-	local construction = marker_edge_object and marker_edge_object.edgeObjectConstruction
+local function plan_new_markers(marker_entity, distance, max_count, stop_target)
 	local edge_entity = api.engine.system.streetSystem.getEdgeForEdgeObject(marker_entity)
 	if not edge_entity or edge_entity < 0 then return nil, "marker has no edge" end
 	local base_edge = api.engine.getComponent(edge_entity, api.type.ComponentType.BASE_EDGE)
-	local markers_by_entity, edge_length = find_markers_on_edge(edge_entity, construction)
+	local markers_by_entity, edge_length = find_markers_on_edge(edge_entity)
 	local placed_marker = markers_by_entity[marker_entity]
 	if not placed_marker then return nil, "marker not found in the signal system" end
 
@@ -276,6 +296,7 @@ local function plan_new_markers(marker_entity, distance, max_count)
 		length = edge_length,
 		start_position = 0,
 		end_position = edge_length,
+		is_in_target_area = is_area_target(edge_entity, base_edge, stop_target),
 	} }
 	local first_edge = walked_edges[1]
 
@@ -315,6 +336,10 @@ local function plan_new_markers(marker_entity, distance, max_count)
 		end
 		local next_edge_entity = next_edge_candidates[1]
 		if #next_edge_candidates > 1 then
+			if stop_target == STOP_TARGET_SWITCH then
+				stop_reason = STOP_TARGET_REASONS[STOP_TARGET_SWITCH]
+				break
+			end
 			next_edge_entity = pick_straightest_edge(next_edge_candidates, node, last_edge)
 			if next_edge_entity == nil then
 				stop_reason = "switch"
@@ -326,17 +351,23 @@ local function plan_new_markers(marker_entity, distance, max_count)
 			stop_reason = "loop"
 			break
 		end
+		local next_base_edge = api.engine.getComponent(next_edge_entity, api.type.ComponentType.BASE_EDGE)
+		local next_is_in_target_area = is_area_target(next_edge_entity, next_base_edge, stop_target)
+		if next_is_in_target_area and not last_edge.is_in_target_area then
+			stop_reason = STOP_TARGET_REASONS[stop_target]
+			break
+		end
 		local next_is_station = is_station(next_edge_entity)
 		if next_is_station then station_edge_count = station_edge_count + 1 end
 		visited_edges[next_edge_entity] = true
-		local next_base_edge = api.engine.getComponent(next_edge_entity, api.type.ComponentType.BASE_EDGE)
-		local next_edge_markers, next_edge_length = find_markers_on_edge(next_edge_entity, construction)
+		local next_edge_markers, next_edge_length = find_markers_on_edge(next_edge_entity)
 		local is_backward = next_base_edge.node1 == node
 		local next_edge = {
 			entity = next_edge_entity,
 			base_edge = next_base_edge,
 			is_backward = is_backward,
 			is_station = next_is_station,
+			is_in_target_area = next_is_in_target_area,
 			start_position = last_edge.end_position,
 			end_position = last_edge.end_position + next_edge_length,
 			length = next_edge_length,
@@ -616,7 +647,7 @@ local function run_job(job)
 	if not job.distance then return end
 	local value_step = job.distance / 100
 	local max_count = math.floor((max_value(edge_object.params) - value_from_params(edge_object.params)) / value_step + VALUE_EPSILON)
-	local steps, skip_reason = plan_new_markers(job.marker, job.distance, max_count)
+	local steps, skip_reason = plan_new_markers(job.marker, job.distance, max_count, stop_target_from_params(edge_object.params))
 	if not steps then
 		log_message("job " .. job.id .. " skipped: " .. tostring(skip_reason))
 	elseif #steps > 0 then
