@@ -14,7 +14,7 @@ return {
 			map_albedo = { 
 				fragmentSamplers = { 
 					albedoTex = { 
-						fileName = "/rail_assets/textures/texture-2k.dds",
+						fileName = "/rail_assets/textures/texture-1k.dds",
 						maxDegreeOfAnisotropy = nil,
 						type = "TWOD",
 						wrapS = "REPEAT",
@@ -36,7 +36,7 @@ return {
 			map_normal = { 
 				fragmentSamplers = { 
 					normalTex = { 
-						fileName = "/rail_assets/textures/texture-2k-normal.dds",
+						fileName = "/rail_assets/textures/texture-1k-normal.dds",
 						type = "TWOD",
 						wrapS = "REPEAT",
 						wrapT = "REPEAT",
