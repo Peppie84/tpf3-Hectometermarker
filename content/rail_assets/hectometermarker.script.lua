@@ -106,7 +106,7 @@ local NO_INDEX = 1
 local YES_INDEX = 2
 local LEFT_INDEX = 1
 local METER_DISPLAY_ON_INDEX = 2
-
+local AUTO_ON_INDEX = 2
 -- Befestigung (peppie84_hmt_mounting): Index 1 = Mast, 2 = Wand, 3 = Ohne
 local SUPPORT_POLE = "pole"
 local SUPPORT_WALL = "wall"
@@ -378,6 +378,9 @@ function data()
         end,
         meterDisplayEnabledFn = function (_captureParams, params)
             return params.peppie84_hmt_meter_display == METER_DISPLAY_ON_INDEX and "Enabled" or "Hidden"
+        end,
+        autoEnabledFn = function (_captureParams, params)
+            return params.peppie84_hmt_auto == AUTO_ON_INDEX and "Enabled" or "Hidden"
         end,
         updateFn = function (captureParams, params)
             local build_models = MODEL_BUILDERS[captureParams and captureParams.model]

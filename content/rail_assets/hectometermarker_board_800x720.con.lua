@@ -209,6 +209,26 @@ function data()
                 uiType = "Slider",
                 values = auto_spacing_values,
                 defaultIndex = 1
+            },
+            {
+                key = "peppie84_hmt_auto_stop_at",
+                name = translate("peppie84_hmt_auto_stop_at_name"),
+                tooltip = translate("peppie84_hmt_auto_stop_at_tooltip"),
+                group = "peppie84_hmt_auto_placement",
+                displayMode = "Horizontal",
+                uiType = "ComboBox",
+                values = {
+                    translate("peppie84_hmt_auto_stop_at_none"),
+                    translate("peppie84_hmt_auto_stop_at_switch"),
+                    translate("peppie84_hmt_auto_stop_at_tunnel"),
+                    translate("peppie84_hmt_auto_stop_at_station"),
+                    translate("peppie84_hmt_auto_stop_at_bridge")
+                },
+                defaultIndex = 1,
+                checkEnabledScript = {
+                    fileName = "hectometermarker.script@autoEnabledFn",
+                    params = {}
+                }
             }
         },
         updateScript = {
