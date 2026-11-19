@@ -3,7 +3,7 @@
 <div align="center">
 
 [![TransportFever3](https://img.shields.io/badge/TransportFever3-22282E?style=flat-square)](https://www.transportfever3.com/de/)
-[![Mod.io Version](https://img.shields.io/badge/Mod.io-Rev1-07C1D8?style=flat-square)]([tpd](https://mod.io/g/transportfever3/m/hektometertafeln#description))
+[![Mod.io Version](https://img.shields.io/badge/Mod.io-Rev2-07C1D8?style=flat-square)](https://mod.io/g/transportfever3/m/hektometertafeln#description)
 [![Last commit](https://img.shields.io/github/last-commit/Peppie84/tpf3-Hectometermarker?style=flat-square&color=important)](https://github.com/Peppie84/tpf3-Hectometermarker/commits/development)
 [![GitHub issues](https://img.shields.io/github/issues/Peppie84/tpf3-Hectometermarker?style=flat-square)](https://github.com/Peppie84/tpf3-Hectometermarker/issues)
 [![Top language](https://img.shields.io/github/languages/top/Peppie84/tpf3-Hectometermarker?style=flat-square&color=blueviolet)](https://github.com/search?q=repo%3APeppie84%2Ftpf3-Hectometermarker++language%3ALua&type=code)
@@ -45,7 +45,16 @@ Bugs oder Features können auf GitHub oder Mod.io gemeldet werden.
 
 ### Changelog
 
-- **v1.0.0 (Rev1)** (14.11.2026)
+- **v1.1.0 (Rev2)** (19.04.2026)<br />
+  - Texturen wurden einheitlich auf 1024<br />
+    angepasst<br />
+  - Unvorhergesehener Konflikt beim Auto-<br />
+    Setzen mit einer anderen Mod wurde<br />
+    behoben<br />
+  - Tooltips bei allen Optionen gesetzt<br />
+  - Feature: Zusätzlicher Stopp beim Auto-<br />
+    Setzen hinzugefügt<br />
+- **v1.0.0 (Rev1)** (14.11.2026)<br />
   Initial release
 
 ---
@@ -79,7 +88,14 @@ Bugs or feature requests can be reported on GitHub or mod.io.
 
 ### Changelog
 
-- **v1.0.0 (Rev1)** (11/14/2026)
+- **v1.1.0 (Rev2)** (11/19/2026)<br />
+  - Textures have been standardized to 1024<br />
+  - Fixed an unforeseen conflict with another<br />
+    mod during auto-placement<br />
+  - Tooltips added for all options<br />
+  - Feature: Added an additional stop during<br />
+    auto-placement
+- **v1.0.0 (Rev1)** (11/14/2026)<br />
   Initial release
 
 

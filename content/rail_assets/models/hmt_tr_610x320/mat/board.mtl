@@ -14,7 +14,7 @@ return {
 			map_albedo = { 
 				fragmentSamplers = { 
 					albedoTex = { 
-						fileName = "/rail_assets/textures/texture-2k.dds",
+						fileName = "/rail_assets/textures/texture-1k.dds",
 						type = "TWOD",
 						wrapS = "REPEAT",
 						wrapT = "REPEAT",

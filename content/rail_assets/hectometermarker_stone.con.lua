@@ -48,6 +48,7 @@ function data()
             {
                 key = "peppie84_hmt_double_sided",
                 name = translate("peppie84_hmt_double_sided_name"),
+                tooltip = translate("peppie84_hmt_double_sided_tooltip"),
                 displayMode = "Horizontal",
                 values = { translate("peppie84_hmt_single"), translate("peppie84_hmt_double") },
                 defaultIndex = 1
@@ -55,6 +56,7 @@ function data()
             {
                 key = "peppie84_hmt_first_digit",
                 name = translate("peppie84_hmt_first_digit_name"),
+                tooltip = translate("peppie84_hmt_first_digit_tooltip"),
                 displayMode = "Horizontal",
                 group = "peppie84_hmt_group_digits",
                 values = first_digit_values,
@@ -63,6 +65,7 @@ function data()
             {
                 key = "peppie84_hmt_second_digit",
                 name = translate("peppie84_hmt_second_digit_name"),
+                tooltip = translate("peppie84_hmt_second_digit_tooltip"),
                 displayMode = "Horizontal",
                 group = "peppie84_hmt_group_digits",
                 values = digit_values,
@@ -71,6 +74,7 @@ function data()
             {
                 key = "peppie84_hmt_hectometer_digit",
                 name = translate("peppie84_hmt_hectometer_digit_name"),
+                tooltip = translate("peppie84_hmt_hectometer_digit_tooltip"),
                 displayMode = "Horizontal",
                 group = "peppie84_hmt_group_digits",
                 values = digit_values,
@@ -79,6 +83,7 @@ function data()
             {
                 key = "peppie84_hmt_distance",
                 name = translate("peppie84_hmt_distance_name"),
+                tooltip = translate("peppie84_hmt_distance_tooltip"),
                 uiType = "Slider",
                 values = { "1.8 m", "2.0 m", "2.1 m", "2.2 m", "2.4 m", "2.6 m", "2.8 m", "3.0 m", "3.2 m", "3.4 m" },
                 numbers = { 1.8, 2.0, 2.15, 2.2, 2.4, 2.6, 2.8, 3.0, 3.2, 3.4 },
@@ -87,6 +92,7 @@ function data()
             {
                 key = "peppie84_hmt_along_offset",
                 name = translate("peppie84_hmt_along_offset_name"),
+                tooltip = translate("peppie84_hmt_along_offset_tooltip"),
                 uiType = "Slider",
                 values = { "-1.5 m", "-1.25 m", "-1.0 m", "-0.75 m", "-0.5 m", "-0.25 m", "0 m", "0.25 m", "0.5 m", "0.75 m", "1.0 m", "1.25 m", "1.5 m" },
                 numbers = { -1.5, -1.25, -1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5 },
@@ -95,6 +101,7 @@ function data()
             {
                 key = "peppie84_hmt_side",
                 name = translate("peppie84_hmt_side_name"),
+                tooltip = translate("peppie84_hmt_side_tooltip"),
                 displayMode = "Horizontal",
                 values = { translate("peppie84_hmt_left"), translate("peppie84_hmt_right") },
                 defaultIndex = 2
@@ -116,6 +123,27 @@ function data()
                 uiType = "Slider",
                 values = auto_spacing_values,
                 defaultIndex = 1
+            },
+            {
+                key = "peppie84_hmt_auto_stop_at",
+                name = translate("peppie84_hmt_auto_stop_at_name"),
+                tooltip = translate("peppie84_hmt_auto_stop_at_tooltip"),
+                group = "peppie84_hmt_auto_placement",
+                displayMode = "Horizontal",
+                uiType = "ComboBox",
+                values = {
+                    translate("peppie84_hmt_auto_stop_at_switch"),
+                    translate("peppie84_hmt_auto_stop_at_tunnel"),
+                    translate("peppie84_hmt_auto_stop_at_station"),
+                    translate("peppie84_hmt_auto_stop_at_bridge"),
+                    translate("peppie84_hmt_auto_stop_at_none")
+                },
+                numbers = { 2, 3, 4, 5, 1 },
+                defaultIndex = 1,
+                checkEnabledScript = {
+                    fileName = "hectometermarker.script@autoEnabledFn",
+                    params = {}
+                }
             }
         },
         updateScript = {
