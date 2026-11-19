@@ -37,6 +37,11 @@ local TANGENT_TIE_EPSILON = 1e-3
 local MAX_SHIFT_METERS = 15
 local SHIFT_STEP_METERS = 15
 local MIN_EDGE_MARGIN_METERS = 0.5
+local PROGRESS_KEY = "peppie84_hmt_auto_progress"
+local PROGRESS_STEP_PERCENT = 10
+local PROGRESS_VALIDATION_SHARE = 60
+local PROGRESS_FILTER_SHARE = 35
+local PROGRESS_MIN_MARKERS = 30
 
 local function log_message(message)
 	debugPrint("[hectometermarker_auto] " .. tostring(message))
@@ -508,116 +513,169 @@ local function shift_candidates(base_shift)
 	return candidates
 end
 
-local function submit_build_proposal(marker_entity, steps, value_step)
+local function new_placement(marker_entity, steps, value_step)
 	local marker_edge_object = api.engine.getComponent(marker_entity, api.type.ComponentType.EDGE_OBJECT)
-	local base_params = type(marker_edge_object.params) == "table" and marker_edge_object.params or {}
-	local start_value = value_from_params(base_params)
-	local carries_shift = is_meter_display_on(base_params)
+	local base_params = {}
+	for key, value in pairs(type(marker_edge_object.params) == "table" and marker_edge_object.params or {}) do
+		base_params[key] = value
+	end
+	return {
+		marker = marker_entity,
+		steps = steps,
+		value_step = value_step,
+		base_params = base_params,
+		start_value = value_from_params(base_params),
+		carries_shift = is_meter_display_on(base_params),
+		buildable_steps = {},
+		current_shift = 0,
+		step_index = 1,
+		phase = "edge",
+	}
+end
 
-	local function step_with_positions(step, positions)
-		return { edge = step.edge, is_left = step.is_left, length = step.length, is_walked_backward = step.is_walked_backward, positions = positions }
+local function step_with_positions(step, positions)
+	return { edge = step.edge, is_left = step.is_left, length = step.length, is_walked_backward = step.is_walked_backward, positions = positions }
+end
+
+local function with_candidate(entries, candidate)
+	local result = {}
+	for _, entry in ipairs(entries) do result[#result + 1] = entry end
+	result[#result + 1] = candidate
+	return result
+end
+
+local function advance_placement(placement)
+	local marker_edge_object = api.engine.getComponent(placement.marker, api.type.ComponentType.EDGE_OBJECT)
+	if not marker_edge_object then
+		log_message("placement cancelled: start marker no longer exists")
+		return true
 	end
 
-	local function errors_of_step(step)
-		local step_proposal, step_context = build_proposal(marker_edge_object, base_params, start_value, value_step, { step })
-		if not step_proposal then return "no markers" end
-		return proposal_errors(step_proposal, step_context)
+	local function check_steps(steps)
+		local proposal, context, count, applied = build_proposal(marker_edge_object, placement.base_params,
+			placement.start_value, placement.value_step, steps)
+		if not proposal then return "no markers" end
+		return proposal_errors(proposal, context), proposal, context, count, applied
 	end
 
-	local buildable_steps = {}
-	local current_shift = 0
-	for _, step in ipairs(steps) do
+	local step = placement.steps[placement.step_index]
+	if placement.phase == "edge" then
+		if not step then
+			placement.phase = "combined"
+			return false
+		end
 		local whole_positions = {}
 		for _, position in ipairs(step.positions) do
-			whole_positions[#whole_positions + 1] = shifted_position(step, position, current_shift)
+			whole_positions[#whole_positions + 1] = shifted_position(step, position, placement.current_shift)
 		end
 		local whole_step = #whole_positions == #step.positions and step_with_positions(step, whole_positions) or nil
-		local errors = whole_step == nil and "marker outside of the edge" or errors_of_step(whole_step)
+		local errors = whole_step == nil and "marker outside of the edge" or check_steps({ whole_step })
 		if not errors then
-			buildable_steps[#buildable_steps + 1] = whole_step
+			placement.buildable_steps[#placement.buildable_steps + 1] = whole_step
+			placement.step_index = placement.step_index + 1
 		else
-			local kept_positions, shift_notes = {}, {}
-			local running_shift = current_shift
-			for _, position in ipairs(step.positions) do
-				local base_shift = carries_shift and running_shift or 0
-				for _, candidate_shift in ipairs(shift_candidates(base_shift)) do
-					local candidate = shifted_position(step, position, candidate_shift)
-					if candidate and not errors_of_step(step_with_positions(step, { candidate })) then
-						kept_positions[#kept_positions + 1] = candidate
-						if carries_shift then running_shift = candidate_shift end
-						if candidate_shift ~= 0 then
-							shift_notes[#shift_notes + 1] = string.format("step %d %+d m", position.step_count, candidate_shift)
-						end
-						break
-					end
-				end
-			end
-			if carries_shift then current_shift = running_shift end
-			local reduced_step = step_with_positions(step, kept_positions)
-			local is_reduced_step_valid = #kept_positions > 0 and not errors_of_step(reduced_step)
-			log_message(string.format("edge %s: %s, kept %d of %d markers%s%s", tostring(step.edge), errors, is_reduced_step_valid and #kept_positions or 0, #step.positions,
-				#kept_positions > 0 and not is_reduced_step_valid and " (rejected together)" or "",
-				#shift_notes > 0 and (", shifted: " .. table.concat(shift_notes, ", ")) or ""))
-			if is_reduced_step_valid then buildable_steps[#buildable_steps + 1] = reduced_step end
+			placement.edge_errors = errors
+			placement.kept_positions, placement.shift_notes = {}, {}
+			placement.running_shift = placement.current_shift
+			placement.position_index, placement.candidate_index = 1, 1
+			placement.phase = "shift"
 		end
+	elseif placement.phase == "shift" then
+		local position = step.positions[placement.position_index]
+		if not position then
+			placement.phase = "reduced"
+			return false
+		end
+		local base_shift = placement.carries_shift and placement.running_shift or 0
+		local candidate_shift = shift_candidates(base_shift)[placement.candidate_index]
+		if candidate_shift == nil then
+			placement.position_index = placement.position_index + 1
+			placement.candidate_index = 1
+			return false
+		end
+		local candidate = shifted_position(step, position, candidate_shift)
+		if candidate and not check_steps({ step_with_positions(step, { candidate }) }) then
+			placement.kept_positions[#placement.kept_positions + 1] = candidate
+			if placement.carries_shift then placement.running_shift = candidate_shift end
+			if candidate_shift ~= 0 then
+				placement.shift_notes[#placement.shift_notes + 1] = string.format("step %d %+d m", position.step_count, candidate_shift)
+			end
+			placement.position_index = placement.position_index + 1
+			placement.candidate_index = 1
+		else
+			placement.candidate_index = placement.candidate_index + 1
+		end
+	elseif placement.phase == "reduced" then
+		if placement.carries_shift then placement.current_shift = placement.running_shift end
+		local kept_positions, shift_notes = placement.kept_positions, placement.shift_notes
+		local reduced_step = step_with_positions(step, kept_positions)
+		local is_valid = #kept_positions > 0 and not check_steps({ reduced_step })
+		log_message(string.format("edge %s: %s, kept %d of %d markers%s%s", tostring(step.edge), placement.edge_errors,
+			is_valid and #kept_positions or 0, #step.positions,
+			#kept_positions > 0 and not is_valid and " (rejected together)" or "",
+			#shift_notes > 0 and (", shifted: " .. table.concat(shift_notes, ", ")) or ""))
+		if is_valid then placement.buildable_steps[#placement.buildable_steps + 1] = reduced_step end
+		placement.step_index = placement.step_index + 1
+		placement.phase = "edge"
+	elseif placement.phase == "combined" or placement.phase == "final" then
+		local steps = placement.phase == "final" and placement.accepted_steps or placement.buildable_steps
+		local errors, proposal, context, count, applied = check_steps(steps)
+		if not proposal then return true end
+		if not errors then
+			api.cmd.sendCommand(api.cmd.makeWorldBuildProposalCmd(proposal, context, false, true))
+			log_message("sent " .. count .. " new markers (" .. tostring(marker_edge_object.edgeObjectConstruction) .. ", params set " .. tostring(applied) .. ")")
+			return true
+		end
+		if placement.phase == "final" then
+			log_message("combined proposal remains invalid: " .. errors)
+			return true
+		end
+		log_message("combined proposal rejected: " .. errors .. "; filtering colliding markers")
+		placement.accepted_steps = {}
+		placement.filter_index = 1
+		placement.phase = "filter_edge"
+	elseif placement.phase == "filter_edge" then
+		local filter_step = placement.buildable_steps[placement.filter_index]
+		if not filter_step then
+			placement.phase = "final"
+			return false
+		end
+		if not check_steps(with_candidate(placement.accepted_steps, filter_step)) then
+			placement.accepted_steps[#placement.accepted_steps + 1] = filter_step
+			placement.filter_index = placement.filter_index + 1
+		else
+			placement.kept_positions = {}
+			placement.position_index = 1
+			placement.phase = "filter_position"
+		end
+	elseif placement.phase == "filter_position" then
+		local filter_step = placement.buildable_steps[placement.filter_index]
+		local position = filter_step.positions[placement.position_index]
+		if not position then
+			if #placement.kept_positions > 0 then
+				placement.accepted_steps[#placement.accepted_steps + 1] = step_with_positions(filter_step, placement.kept_positions)
+			end
+			placement.filter_index = placement.filter_index + 1
+			placement.phase = "filter_edge"
+			return false
+		end
+		local candidate_step = step_with_positions(filter_step, with_candidate(placement.kept_positions, position))
+		local errors = check_steps(with_candidate(placement.accepted_steps, candidate_step))
+		if errors then
+			log_message(string.format("edge %s: marker step %d rejected in combined proposal: %s", tostring(filter_step.edge), position.step_count, errors))
+		else
+			placement.kept_positions[#placement.kept_positions + 1] = position
+		end
+		placement.position_index = placement.position_index + 1
+	else
+		error("unknown placement phase: " .. tostring(placement.phase))
 	end
+	return false
+end
 
-	local proposal, context, marker_count, all_params_applied = build_proposal(marker_edge_object, base_params, start_value, value_step, buildable_steps)
-	if not proposal then return end
-	local combined_errors = proposal_errors(proposal, context)
-	if combined_errors then
-		log_message("combined proposal rejected: " .. combined_errors .. "; filtering colliding markers")
-		local accepted_steps = {}
-		local function steps_with_candidate(candidate)
-			local candidate_steps = {}
-			for _, accepted_step in ipairs(accepted_steps) do
-				candidate_steps[#candidate_steps + 1] = accepted_step
-			end
-			candidate_steps[#candidate_steps + 1] = candidate
-			return candidate_steps
-		end
-		local function errors_of_steps(candidate_steps)
-			local candidate_proposal, candidate_context = build_proposal(marker_edge_object, base_params, start_value, value_step, candidate_steps)
-			if not candidate_proposal then return "no markers" end
-			return proposal_errors(candidate_proposal, candidate_context)
-		end
-
-		for _, step in ipairs(buildable_steps) do
-			if not errors_of_steps(steps_with_candidate(step)) then
-				accepted_steps[#accepted_steps + 1] = step
-			else
-				local kept_positions = {}
-				for _, position in ipairs(step.positions) do
-					local candidate_positions = {}
-					for _, kept_position in ipairs(kept_positions) do
-						candidate_positions[#candidate_positions + 1] = kept_position
-					end
-					candidate_positions[#candidate_positions + 1] = position
-					local candidate_step = step_with_positions(step, candidate_positions)
-					local errors = errors_of_steps(steps_with_candidate(candidate_step))
-					if errors then
-						log_message(string.format("edge %s: marker step %d rejected in combined proposal: %s", tostring(step.edge), position.step_count, errors))
-					else
-						kept_positions[#kept_positions + 1] = position
-					end
-				end
-				if #kept_positions > 0 then
-					accepted_steps[#accepted_steps + 1] = step_with_positions(step, kept_positions)
-				end
-			end
-		end
-
-		buildable_steps = accepted_steps
-		proposal, context, marker_count, all_params_applied = build_proposal(marker_edge_object, base_params, start_value, value_step, buildable_steps)
-		if not proposal then return end
-		combined_errors = proposal_errors(proposal, context)
-		if combined_errors then
-			log_message("combined proposal remains invalid: " .. combined_errors)
-			return
-		end
-	end
-	api.cmd.sendCommand(api.cmd.makeWorldBuildProposalCmd(proposal, context, false, true))
-	log_message("sent " .. marker_count .. " new markers (" .. tostring(marker_edge_object.edgeObjectConstruction) .. ", params set " .. tostring(all_params_applied) .. ")")
+local function submit_build_proposal(marker_entity, steps, value_step)
+	local placement = new_placement(marker_entity, steps, value_step)
+	while not advance_placement(placement) do end
 end
 
 local function read_state(state)
@@ -680,12 +738,13 @@ end
 local function handle_event(user_params, state, source, id, event_name, event_params)
 	if event_name ~= "onPostBuildProposal" then return end
 	local job_state = read_state(state)
+	job_state.build_revision = (job_state.build_revision or 0) + 1
 	local succeeded, error_message = pcall(on_post_build_proposal, event_params, job_state)
 	if not succeeded then log_message("event error: " .. tostring(error_message)) end
 	state:set(job_state)
 end
 
-local function run_job(job)
+local function run_job(job, defer_placement)
 	local edge_object = api.engine.getComponent(job.marker, api.type.ComponentType.EDGE_OBJECT)
 	if not edge_object or type(edge_object.params) ~= "table" then
 		log_message("job " .. job.id .. " skipped: marker has no params")
@@ -701,8 +760,70 @@ local function run_job(job)
 	if not steps then
 		log_message("job " .. job.id .. " skipped: " .. tostring(skip_reason))
 	elseif #steps > 0 then
+		if defer_placement then return new_placement(job.marker, steps, value_step) end
 		submit_build_proposal(job.marker, steps, value_step)
 	end
+end
+
+-- Only Lua planning data survives a GUI update; native proposals are rebuilt each time.
+local pending_job
+
+local progress_hint = { percent = nil, failed = false }
+
+local function planned_marker_count(placement)
+	local count = 0
+	for _, step in ipairs(placement.steps) do count = count + #step.positions end
+	return count
+end
+
+local function placement_percent(placement)
+	local phase = placement.phase
+	if phase == "edge" or phase == "shift" or phase == "reduced" then
+		return math.floor(PROGRESS_VALIDATION_SHARE * (placement.step_index - 1) / math.max(#placement.steps, 1))
+	end
+	if phase == "filter_edge" or phase == "filter_position" then
+		return PROGRESS_VALIDATION_SHARE + math.floor(PROGRESS_FILTER_SHARE * (placement.filter_index - 1) / math.max(#placement.buildable_steps, 1))
+	end
+	return phase == "combined" and PROGRESS_VALIDATION_SHARE or PROGRESS_VALIDATION_SHARE + PROGRESS_FILTER_SHARE
+end
+
+local function progress_text(percent)
+	local succeeded, translated_text = pcall(_, PROGRESS_KEY)
+	if not succeeded or type(translated_text) ~= "string" or translated_text == "" or translated_text == PROGRESS_KEY then
+		translated_text = "Hektometertafeln werden gesetzt ... %d%%"
+	end
+	return (string.format(translated_text, percent))
+end
+
+-- The guide system is the only documented GUI element that can show free text; failures only disable the hint.
+local function show_progress(percent)
+	if progress_hint.failed then return end
+	if progress_hint.percent and percent - progress_hint.percent < PROGRESS_STEP_PERCENT then return end
+	local had_hint = progress_hint.percent ~= nil
+	local succeeded, shown = pcall(function()
+		local guide = api.gui.guide
+		local text = progress_text(percent)
+		local spawned = guide.trySpawnGuideFree(guide.FreeGuidePosition.High, text, text)
+		if had_hint and spawned ~= true then
+			guide.resetGuide()
+			spawned = guide.trySpawnGuideFree(guide.FreeGuidePosition.High, text, text)
+		end
+		return spawned
+	end)
+	if succeeded and shown == true then
+		progress_hint.percent = percent
+		return
+	end
+	progress_hint.percent = nil
+	progress_hint.failed = true
+	log_message("progress hint unavailable: " .. (succeeded and "guide was not spawned" or tostring(shown)))
+end
+
+local function hide_progress()
+	local had_hint = progress_hint.percent ~= nil
+	progress_hint.percent = nil
+	progress_hint.failed = false
+	if had_hint then pcall(function() api.gui.guide.resetGuide() end) end
 end
 
 local function gui_update(user_params, state, gui_state)
@@ -710,20 +831,50 @@ local function gui_update(user_params, state, gui_state)
 	local jobs = type(job_state) == "table" and type(job_state.jobs) == "table" and job_state.jobs or {}
 	local gui_progress = gui_state:get()
 	if type(gui_progress) ~= "table" or gui_progress.done == nil then
+		pending_job = nil
+		hide_progress()
 		local newest_job_id = 0
 		for _, job in ipairs(jobs) do newest_job_id = math.max(newest_job_id, job.id or 0) end
 		gui_state:set({ done = newest_job_id })
 		return
 	end
-	local done_job_id = gui_progress.done
-	for _, job in ipairs(jobs) do
-		if (job.id or 0) > done_job_id then
-			local succeeded, error_message = pcall(run_job, job)
-			if not succeeded then log_message("job " .. job.id .. " failed: " .. tostring(error_message)) end
-			done_job_id = job.id
+	local build_revision = type(job_state) == "table" and job_state.build_revision or 0
+	if pending_job and pending_job.build_revision ~= build_revision then
+		log_message("job " .. pending_job.id .. " cancelled: world changed during placement validation; place the start marker again to retry")
+		pending_job = nil
+		hide_progress()
+		return
+	end
+	if not pending_job then
+		for _, job in ipairs(jobs) do
+			if (job.id or 0) > gui_progress.done then
+				pending_job = {
+					id = job.id,
+					job = job,
+					build_revision = build_revision,
+				}
+				gui_state:set({ done = job.id })
+				break
+			end
 		end
 	end
-	if done_job_id ~= gui_progress.done then gui_state:set({ done = done_job_id }) end
+	if not pending_job then return end
+	local succeeded, finished = pcall(function()
+		if not pending_job.placement then
+			pending_job.placement = run_job(pending_job.job, true)
+		end
+		local placement = pending_job.placement
+		local is_finished = not placement or advance_placement(placement)
+		if not is_finished and planned_marker_count(placement) > PROGRESS_MIN_MARKERS then
+			show_progress(placement_percent(placement))
+		end
+		return is_finished
+	end)
+	if not succeeded then log_message("job " .. pending_job.id .. " failed: " .. tostring(finished)) end
+	if not succeeded or finished then
+		pending_job = nil
+		hide_progress()
+	end
 end
 
 local AutoPlacementScript = {

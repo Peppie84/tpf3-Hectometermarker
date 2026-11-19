@@ -45,7 +45,16 @@ Bugs oder Features können auf GitHub oder Mod.io gemeldet werden.
 
 ### Changelog
 
-- **v1.0.0 (Rev1)** (14.11.2026)
+- **v1.1.0 (Rev2)** (19.04.2026)<br />
+  - Texturen wurden einheitlich auf 1024<br />
+    angepasst<br />
+  - Unvorhergesehener Konflikt beim Auto-<br />
+    Setzen mit einer anderen Mod wurde<br />
+    behoben<br />
+  - Tooltips bei allen Optionen gesetzt<br />
+  - Feature: Zusätzlicher Stopp beim Auto-<br />
+    Setzen hinzugefügt<br />
+- **v1.0.0 (Rev1)** (14.11.2026)<br />
   Initial release
 
 ---
@@ -79,7 +88,14 @@ Bugs or feature requests can be reported on GitHub or mod.io.
 
 ### Changelog
 
-- **v1.0.0 (Rev1)** (11/14/2026)
+- **v1.1.0 (Rev2)** (11/19/2026)<br />
+  - Textures have been standardized to 1024<br />
+  - Fixed an unforeseen conflict with another<br />
+    mod during auto-placement<br />
+  - Tooltips added for all options<br />
+  - Feature: Added an additional stop during<br />
+    auto-placement
+- **v1.0.0 (Rev1)** (11/14/2026)<br />
   Initial release
 
 

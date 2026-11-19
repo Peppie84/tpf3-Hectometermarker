@@ -232,12 +232,13 @@ function data()
                 displayMode = "Horizontal",
                 uiType = "ComboBox",
                 values = {
-                    translate("peppie84_hmt_auto_stop_at_none"),
                     translate("peppie84_hmt_auto_stop_at_switch"),
                     translate("peppie84_hmt_auto_stop_at_tunnel"),
                     translate("peppie84_hmt_auto_stop_at_station"),
-                    translate("peppie84_hmt_auto_stop_at_bridge")
+                    translate("peppie84_hmt_auto_stop_at_bridge"),
+                    translate("peppie84_hmt_auto_stop_at_none")
                 },
+                numbers = { 2, 3, 4, 5, 1 },
                 defaultIndex = 1,
                 checkEnabledScript = {
                     fileName = "hectometermarker.script@autoEnabledFn",
