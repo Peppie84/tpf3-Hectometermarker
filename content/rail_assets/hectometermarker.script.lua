@@ -132,6 +132,8 @@ local BOARD_FAMILIES = {
 -- Index 1 = Tief, 2 = Default, 3 = Hoch (nur ohne Mast); Höhenversatz in Metern
 local POLE_HEIGHT_ADJUSTMENTS = { -1.0, 0 }
 local MOUNTED_HEIGHT_ADJUSTMENTS = { -1.0, 0, 1.0 }
+-- Stein (peppie84_hmt_stone_height): Index 1 = Default, 2 = Hoch
+local STONE_HEIGHT_ADJUSTMENTS = { 0, 0.3 }
 
 -- Index 1 = Nein, 2 = Ja
 local NO_INDEX = 1
@@ -153,6 +155,7 @@ local PARAM_DEFAULTS = {
     peppie84_hmt_reflector = NO_INDEX,
     peppie84_hmt_height = 2,
     peppie84_hmt_height_mounted = 2,
+    peppie84_hmt_stone_height = 1,
     peppie84_hmt_meter_display = 1,
     peppie84_hmt_meter_first_digit = 1,
     peppie84_hmt_meter_second_digit = 1
@@ -245,12 +248,13 @@ local function build_stone_840x480(params)
     local second_digit = decode_other_digit(params.peppie84_hmt_second_digit)
     local hectometer_digit = decode_other_digit(params.peppie84_hmt_hectometer_digit)
     local models = {}
+    local height = STONE_HEIGHT_ADJUSTMENTS[tonumber(params.peppie84_hmt_stone_height) or 1] or 0
 
-    append_model(models, STONE_840X480_MODEL, 0, offset, STONE_840X480_HEIGHT_ADJUSTMENT, false, STONE_840X480_SCALE)
+    append_model(models, STONE_840X480_MODEL, 0, offset, STONE_840X480_HEIGHT_ADJUSTMENT + height, false, STONE_840X480_SCALE)
     append_pair(models, first_digit_index == NEGATIVE_FIRST_DIGIT_INDEX and NEGATIVE_SIGN or first_digit,
-        second_digit, STONE_840X480_DIGIT_FRONT_X, offset, STONE_840X480_TOP_Z, STONE_840X480_DIGIT_PAIR_HALF_GAP,
+        second_digit, STONE_840X480_DIGIT_FRONT_X, offset, STONE_840X480_TOP_Z + height, STONE_840X480_DIGIT_PAIR_HALF_GAP,
         is_double_sided, -STONE_840X480_DIGIT_FRONT_X, STONE_840X480_DIGIT_SCALE)
-    append_digit(models, hectometer_digit, STONE_840X480_DIGIT_FRONT_X, offset, STONE_840X480_BOTTOM_Z, is_double_sided,
+    append_digit(models, hectometer_digit, STONE_840X480_DIGIT_FRONT_X, offset, STONE_840X480_BOTTOM_Z + height, is_double_sided,
         -STONE_840X480_HECTOMETER_BACK_X, offset, STONE_840X480_DIGIT_SCALE)
     return models
 end

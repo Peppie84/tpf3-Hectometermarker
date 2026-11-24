@@ -211,6 +211,14 @@ function data()
                 defaultIndex = 2
             },
             {
+                key = "peppie84_hmt_auto_double_track",
+                name = translate("peppie84_hmt_auto_double_track_name"),
+                tooltip = translate("peppie84_hmt_auto_double_track_tooltip"),
+                displayMode = "Horizontal",
+                values = { translate("peppie84_hmt_no"), translate("peppie84_hmt_yes") },
+                defaultIndex = 1
+            },
+            {
                 key = "peppie84_hmt_auto",
                 name = translate("peppie84_hmt_auto_name"),
                 tooltip = translate("peppie84_hmt_auto_tooltip"),
@@ -243,19 +251,6 @@ function data()
                     translate("peppie84_hmt_auto_stop_at_none")
                 },
                 numbers = { 2, 3, 4, 5, 1 },
-                defaultIndex = 1,
-                checkEnabledScript = {
-                    fileName = "hectometermarker.script@autoEnabledFn",
-                    params = {}
-                }
-            },
-            {
-                key = "peppie84_hmt_auto_double_track",
-                name = translate("peppie84_hmt_auto_double_track_name"),
-                tooltip = translate("peppie84_hmt_auto_double_track_tooltip"),
-                group = "peppie84_hmt_auto_placement",
-                displayMode = "Horizontal",
-                values = { translate("peppie84_hmt_no"), translate("peppie84_hmt_yes") },
                 defaultIndex = 1,
                 checkEnabledScript = {
                     fileName = "hectometermarker.script@autoEnabledFn",

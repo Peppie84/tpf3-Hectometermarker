@@ -34,6 +34,7 @@ local STOP_TARGET_REASONS = {
 	[STOP_TARGET_STATION] = "target station",
 	[STOP_TARGET_BRIDGE] = "target bridge",
 }
+local DOUBLE_TRACK_OFF_INDEX = 1
 local DOUBLE_TRACK_ON_INDEX = 2
 local LEFT_SIDE_INDEX = 1
 local NEIGHBOUR_SEARCH_RADIUS = 12
@@ -50,6 +51,7 @@ local TANGENT_TIE_EPSILON = 1e-3
 local MAX_SHIFT_METERS = 15
 local SHIFT_STEP_METERS = 15
 local MIN_EDGE_MARGIN_METERS = 0.5
+local REPLACE_TOLERANCE_METERS = 2
 local PROGRESS_KEY = "peppie84_hmt_auto_progress"
 local PROGRESS_STEP_PERCENT = 10
 local PROGRESS_VALIDATION_SHARE = 60
@@ -152,6 +154,7 @@ local function params_for_value(base_params, value, shift_meters)
 	local new_params = {}
 	for key, param_value in pairs(base_params) do new_params[key] = param_value end
 	new_params[AUTO_KEY] = 1
+	new_params[DOUBLE_TRACK_KEY] = DOUBLE_TRACK_OFF_INDEX
 	if shift_meters and shift_meters ~= 0 and is_meter_display_on(base_params) then
 		local shifted_meter
 		value, shifted_meter = shift_meters_in_value(base_params, value, shift_meters)
@@ -464,22 +467,59 @@ local function plan_new_markers(marker_entity, distance, max_count, stop_target)
 	return steps, nil, start_reference
 end
 
+-- Single placement without auto: no marker chain, only the start marker as reference for its partner on track B.
+local function plan_start_reference(marker_entity)
+	local edge_entity = api.engine.system.streetSystem.getEdgeForEdgeObject(marker_entity)
+	if not edge_entity or edge_entity < 0 then return nil, "marker has no edge" end
+	local markers_by_entity, edge_length = find_markers_on_edge(edge_entity)
+	local placed_marker = markers_by_entity[marker_entity]
+	if not placed_marker then return nil, "marker not found in the signal system" end
+	if edge_length <= 0 then return nil, "marker edge has no length" end
+	return {}, nil, {
+		edge = edge_entity,
+		relative_position = placed_marker.position / edge_length,
+		is_walked_backward = placed_marker.is_left,
+		step_count = 0,
+		shift_meters = 0,
+	}
+end
+
 local function try_set_params(new_edge_object, params)
 	return (pcall(function() new_edge_object.params = params end))
+end
+
+-- A hectometer marker already standing where a neighbour-track marker is planned (e.g. after replacing the start marker) is replaced.
+local function markers_to_replace(step)
+	local replaced = {}
+	if not step.is_double_track then return replaced end
+	local markers_by_entity, edge_length = find_markers_on_edge(step.edge)
+	for entity, marker in pairs(markers_by_entity) do
+		for _, position in ipairs(step.positions) do
+			if math.abs(marker.position - position.relative_position * edge_length) <= REPLACE_TOLERANCE_METERS then
+				replaced[entity] = true
+			end
+		end
+	end
+	return replaced
 end
 
 local function build_proposal(marker_edge_object, base_params, start_value, value_step, steps)
 	local player = api.engine.util.getPlayer()
 	local all_params_applied = nil
 
-	local edges_to_add, edges_to_remove, edge_objects_to_add = {}, {}, {}
+	local edges_to_add, edges_to_remove, edge_objects_to_add, edge_objects_to_remove = {}, {}, {}, {}
 	local next_placeholder_entity = FIRST_PLACEHOLDER_ENTITY
 	for step_index, step in ipairs(steps) do
 		local base_edge = api.engine.getComponent(step.edge, api.type.ComponentType.BASE_EDGE)
 		if base_edge then
 			local edge_objects = {}
+			local replaced = markers_to_replace(step)
 			for _, object_entry in ipairs(base_edge.objects or {}) do
-				edge_objects[#edge_objects + 1] = { object_entry[1], object_entry[2] }
+				if replaced[object_entry[1]] then
+					edge_objects_to_remove[#edge_objects_to_remove + 1] = object_entry[1]
+				else
+					edge_objects[#edge_objects + 1] = { object_entry[1], object_entry[2] }
+				end
 			end
 			local segment = api.type.SegmentAndEntity.new()
 			segment.entity = -step_index
@@ -512,6 +552,7 @@ local function build_proposal(marker_edge_object, base_params, start_value, valu
 	proposal.streetProposal.edgesToRemove = edges_to_remove
 	proposal.streetProposal.edgesToAdd = edges_to_add
 	proposal.streetProposal.edgeObjectsToAdd = edge_objects_to_add
+	if #edge_objects_to_remove > 0 then proposal.streetProposal.edgeObjectsToRemove = edge_objects_to_remove end
 	local context = api.type.Context.new()
 	context.player = player
 	return proposal, context, #edge_objects_to_add, all_params_applied
@@ -729,7 +770,7 @@ local function shift_candidates(base_shift)
 	return candidates
 end
 
-local function new_placement(marker_entity, steps, value_step, start_reference)
+local function new_placement(marker_entity, steps, value_step, start_reference, is_single)
 	local marker_edge_object = api.engine.getComponent(marker_entity, api.type.ComponentType.EDGE_OBJECT)
 	local base_params = {}
 	for key, value in pairs(type(marker_edge_object.params) == "table" and marker_edge_object.params or {}) do
@@ -740,6 +781,7 @@ local function new_placement(marker_entity, steps, value_step, start_reference)
 		steps = steps,
 		value_step = value_step,
 		start_reference = start_reference,
+		is_single = is_single,
 		base_params = base_params,
 		start_value = value_from_params(base_params),
 		carries_shift = is_meter_display_on(base_params),
@@ -842,7 +884,7 @@ local function advance_placement(placement)
 			return false
 		end
 		local base_shift = chains_shift and placement.running_shift or 0
-		local candidate_shift = shift_candidates(base_shift)[placement.candidate_index]
+		local candidate_shift = (placement.is_single and { base_shift } or shift_candidates(base_shift))[placement.candidate_index]
 		if candidate_shift == nil then
 			placement.position_index = placement.position_index + 1
 			placement.candidate_index = 1
@@ -869,6 +911,9 @@ local function advance_placement(placement)
 			is_valid and #kept_positions or 0, #step.positions,
 			#kept_positions > 0 and not is_valid and " (rejected together)" or "",
 			#shift_notes > 0 and (", shifted: " .. table.concat(shift_notes, ", ")) or "")
+		if placement.is_single and not is_valid then
+			log_message(string.format("double track: no marker on edge %s: %s", tostring(step.edge), tostring(placement.edge_errors)))
+		end
 		if is_valid then placement.buildable_steps[#placement.buildable_steps + 1] = reduced_step end
 		placement.step_index = placement.step_index + 1
 		placement.phase = "edge"
@@ -928,8 +973,8 @@ local function advance_placement(placement)
 	return false
 end
 
-local function submit_build_proposal(marker_entity, steps, value_step, start_reference)
-	local placement = new_placement(marker_entity, steps, value_step, start_reference)
+local function submit_build_proposal(marker_entity, steps, value_step, start_reference, is_single)
+	local placement = new_placement(marker_entity, steps, value_step, start_reference, is_single)
 	while not advance_placement(placement) do end
 end
 
@@ -1008,15 +1053,21 @@ local function run_job(job, defer_placement)
 	local name = marker_name(edge_object.params)
 	api.cmd.sendCommand(api.cmd.makeEntitySetNameCmd(job.marker, name, true))
 	debug_message("job %d: named marker %s '%s'", job.id, tostring(job.marker), tostring(name))
-	if not job.distance then return end
-	local value_step = job.distance / 100
-	local max_count = math.floor((max_value(edge_object.params) - value_from_params(edge_object.params)) / value_step + VALUE_EPSILON)
-	local steps, skip_reason, start_reference = plan_new_markers(job.marker, job.distance, max_count, stop_target_from_params(edge_object.params))
+	local is_single = not job.distance
+	if is_single and not double_track_from_params(edge_object.params) then return end
+	local value_step = job.distance and job.distance / 100 or 1
+	local steps, skip_reason, start_reference
+	if is_single then
+		steps, skip_reason, start_reference = plan_start_reference(job.marker)
+	else
+		local max_count = math.floor((max_value(edge_object.params) - value_from_params(edge_object.params)) / value_step + VALUE_EPSILON)
+		steps, skip_reason, start_reference = plan_new_markers(job.marker, job.distance, max_count, stop_target_from_params(edge_object.params))
+	end
 	if not steps then
 		log_message("job " .. job.id .. " skipped: " .. tostring(skip_reason))
 	elseif #steps > 0 or (start_reference and double_track_from_params(edge_object.params)) then
-		if defer_placement then return new_placement(job.marker, steps, value_step, start_reference) end
-		submit_build_proposal(job.marker, steps, value_step, start_reference)
+		if defer_placement then return new_placement(job.marker, steps, value_step, start_reference, is_single) end
+		submit_build_proposal(job.marker, steps, value_step, start_reference, is_single)
 	end
 end
 
