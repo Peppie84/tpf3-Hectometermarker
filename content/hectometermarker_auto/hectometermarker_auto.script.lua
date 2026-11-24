@@ -56,8 +56,15 @@ local PROGRESS_VALIDATION_SHARE = 60
 local PROGRESS_FILTER_SHARE = 35
 local PROGRESS_MIN_MARKERS = 30
 
+-- Set to true to also log per-node, per-marker and per-edge details when debugging.
+local DEBUG_LOG = false
+
 local function log_message(message)
 	debugPrint("[hectometermarker_auto] " .. tostring(message))
+end
+
+local function debug_message(format, ...)
+	if DEBUG_LOG then log_message(string.format(format, ...)) end
 end
 
 local function combo_box_index(raw_value, default_index)
@@ -292,8 +299,8 @@ local function pick_straightest_edge(candidates, node, last_edge)
 			if outgoing_x ~= nil then
 				local alignment = incoming_x * outgoing_x + incoming_y * outgoing_y
 				local chord = chord_alignment(candidate_base_edge, node, incoming_x, incoming_y)
-				log_message(string.format("node %s: from edge %s (%.2f, %.2f) candidate edge %s (%.2f, %.2f) alignment %.3f, chord %.3f",
-					tostring(node), tostring(last_edge.entity), incoming_x, incoming_y, tostring(candidate), outgoing_x, outgoing_y, alignment, chord))
+				debug_message("node %s: from edge %s (%.2f, %.2f) candidate edge %s (%.2f, %.2f) alignment %.3f, chord %.3f",
+					tostring(node), tostring(last_edge.entity), incoming_x, incoming_y, tostring(candidate), outgoing_x, outgoing_y, alignment, chord)
 				local is_better = alignment > best_alignment + TANGENT_TIE_EPSILON
 					or (alignment > 0 and math.abs(alignment - best_alignment) <= TANGENT_TIE_EPSILON and chord > best_chord)
 				if is_better then best_edge, best_alignment, best_chord = candidate, alignment, chord end
@@ -616,7 +623,7 @@ local function locate_neighbour_on_edge(edge_entity, position, direction_x, dire
 	return best_match
 end
 
--- The neighbour track lies on the side opposite to the marker's side, measured from the counting direction.
+-- The neighbour track preferably lies on the side opposite to the marker's side, measured from the counting direction.
 local function find_neighbour_track(reference, is_marker_left, excluded_edges, notes)
 	local sections, total_length = edge_sections(reference.edge)
 	if not sections then return nil end
@@ -634,15 +641,24 @@ local function find_neighbour_track(reference, is_marker_left, excluded_edges, n
 	local candidates = {}
 	api.engine.system.octreeSystem.findIntersectingEntities(box, function(entity) candidates[#candidates + 1] = entity end)
 	notes[#notes + 1] = string.format("%d octree entities", #candidates)
-	local best_match = nil
+	local track_candidates = {}
 	for _, candidate in ipairs(candidates) do
 		local candidate_edge = not excluded_edges[candidate] and api.engine.getComponent(candidate, api.type.ComponentType.BASE_EDGE)
 		if candidate_edge and is_track_edge(candidate, candidate_edge) and not is_station(candidate) then
-			local match = locate_neighbour_on_edge(candidate, position, direction_x, direction_y, normal_x, normal_y, notes)
-			if match and (best_match == nil or match.lateral < best_match.lateral) then best_match = match end
+			track_candidates[#track_candidates + 1] = candidate
 		end
 	end
-	return best_match
+	-- Outside of the marker's side first (marker stands outside on both tracks); without a track there the neighbour
+	-- lies on the marker's own side and both markers end up between the tracks.
+	for _, side_sign in ipairs({ 1, -1 }) do
+		local best_match = nil
+		for _, candidate in ipairs(track_candidates) do
+			local match = locate_neighbour_on_edge(candidate, position, direction_x, direction_y, normal_x * side_sign, normal_y * side_sign, notes)
+			if match and (best_match == nil or match.lateral < best_match.lateral) then best_match = match end
+		end
+		if best_match then return best_match end
+	end
+	return nil
 end
 
 local function plan_double_track_steps(references, is_marker_left, excluded_edges)
@@ -659,7 +675,7 @@ local function plan_double_track_steps(references, is_marker_left, excluded_edge
 			notes[#notes + 1] = string.format("neighbour on edge %s at %.4f rejected: too close to the edge end", tostring(match.edge), match.relative_position)
 		end
 		if not match or not (match.relative_position > margin and match.relative_position < 1 - margin) then
-			log_message("double track: no neighbour: " .. table.concat(notes, "; "))
+			debug_message("double track: no neighbour: %s", table.concat(notes, "; "))
 		end
 		local margin = match and MIN_EDGE_MARGIN_METERS / match.length
 		if match and match.relative_position > margin and match.relative_position < 1 - margin then
@@ -849,10 +865,10 @@ local function advance_placement(placement)
 		local kept_positions, shift_notes = placement.kept_positions, placement.shift_notes
 		local reduced_step = step_with_positions(step, kept_positions)
 		local is_valid = #kept_positions > 0 and not check_steps({ reduced_step })
-		log_message(string.format("edge %s: %s, kept %d of %d markers%s%s", tostring(step.edge), placement.edge_errors,
+		debug_message("edge %s: %s, kept %d of %d markers%s%s", tostring(step.edge), tostring(placement.edge_errors),
 			is_valid and #kept_positions or 0, #step.positions,
 			#kept_positions > 0 and not is_valid and " (rejected together)" or "",
-			#shift_notes > 0 and (", shifted: " .. table.concat(shift_notes, ", ")) or ""))
+			#shift_notes > 0 and (", shifted: " .. table.concat(shift_notes, ", ")) or "")
 		if is_valid then placement.buildable_steps[#placement.buildable_steps + 1] = reduced_step end
 		placement.step_index = placement.step_index + 1
 		placement.phase = "edge"
@@ -901,7 +917,7 @@ local function advance_placement(placement)
 		local candidate_step = step_with_positions(filter_step, with_candidate(placement.kept_positions, position))
 		local errors = check_steps(with_candidate(placement.accepted_steps, candidate_step))
 		if errors then
-			log_message(string.format("edge %s: marker step %d rejected in combined proposal: %s", tostring(filter_step.edge), position.step_count, errors))
+			debug_message("edge %s: marker step %d rejected in combined proposal: %s", tostring(filter_step.edge), position.step_count, tostring(errors))
 		else
 			placement.kept_positions[#placement.kept_positions + 1] = position
 		end
@@ -967,7 +983,7 @@ local function on_post_build_proposal(event_params, job_state)
 		if edge_object and type(edge_object.params) == "table" and edge_object.params[FIRST_DIGIT_KEY] ~= nil then
 			local distance = distance_from_params(edge_object.params)
 			job_state.jobs[#job_state.jobs + 1] = { id = job_state.next_job_id, marker = marker, distance = distance }
-			log_message("job " .. job_state.next_job_id .. ": marker " .. marker .. ", " .. tostring(distance) .. " m")
+			debug_message("job %d: marker %s, %s m", job_state.next_job_id, tostring(marker), tostring(distance))
 			job_state.next_job_id = job_state.next_job_id + 1
 		end
 	end
@@ -991,7 +1007,7 @@ local function run_job(job, defer_placement)
 	end
 	local name = marker_name(edge_object.params)
 	api.cmd.sendCommand(api.cmd.makeEntitySetNameCmd(job.marker, name, true))
-	log_message("job " .. job.id .. ": named marker " .. job.marker .. " '" .. name .. "'")
+	debug_message("job %d: named marker %s '%s'", job.id, tostring(job.marker), tostring(name))
 	if not job.distance then return end
 	local value_step = job.distance / 100
 	local max_count = math.floor((max_value(edge_object.params) - value_from_params(edge_object.params)) / value_step + VALUE_EPSILON)
