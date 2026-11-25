@@ -52,6 +52,8 @@ local MAX_SHIFT_METERS = 15
 local SHIFT_STEP_METERS = 15
 local MIN_EDGE_MARGIN_METERS = 0.5
 local REPLACE_TOLERANCE_METERS = 2
+local HERMITE_SEARCH_STEPS = 50
+local HERMITE_SEARCH_PASSES = 4
 local PROGRESS_KEY = "peppie84_hmt_auto_progress"
 local PROGRESS_STEP_PERCENT = 10
 local PROGRESS_VALIDATION_SHARE = 60
@@ -488,6 +490,9 @@ local function try_set_params(new_edge_object, params)
 	return (pcall(function() new_edge_object.params = params end))
 end
 
+-- Defined below next to the other geometry helpers.
+local edge_param_for_position
+
 -- A hectometer marker already standing where a neighbour-track marker is planned (e.g. after replacing the start marker) is replaced.
 local function markers_to_replace(step)
 	local replaced = {}
@@ -532,7 +537,7 @@ local function build_proposal(marker_edge_object, base_params, start_value, valu
 				next_placeholder_entity = next_placeholder_entity - 1
 				local new_edge_object = api.type.SimpleStreetProposal.EdgeObject.new()
 				new_edge_object.edgeEntity = segment.entity
-				new_edge_object.param = position.relative_position
+				new_edge_object.param = edge_param_for_position(step.edge, base_edge, position.relative_position)
 				new_edge_object.oneWay = false
 				new_edge_object.left = step.is_left
 				new_edge_object.model = marker_edge_object.edgeObjectConstruction
@@ -607,6 +612,46 @@ local function point_on_edge(sections, total_length, relative_position)
 	end
 	local param = section.length > 0 and math.min(math.max((meters - section.start_position) / section.length, 0), 1) or 0
 	return geometry_call(section.geometry, "calcPos", param)
+end
+
+local function hermite_coordinate(t, p0, m0, p1, m1)
+	local t2, t3 = t * t, t * t * t
+	return (2 * t3 - 3 * t2 + 1) * p0 + (t3 - 2 * t2 + t) * m0 + (-2 * t3 + 3 * t2) * p1 + (t3 - t2) * m1
+end
+
+local function hermite_point(base_edge, t)
+	local p0, p1, m0, m1 = base_edge.position0, base_edge.position1, base_edge.tangent0, base_edge.tangent1
+	return hermite_coordinate(t, p0.x, m0.x, p1.x, m1.x), hermite_coordinate(t, p0.y, m0.y, p1.y, m1.y)
+end
+
+-- The param of an edge object is the parameter of the base edge's Hermite curve, not a fraction of the summed
+-- section lengths (those do not necessarily cover the whole base edge). Finds the curve parameter nearest to the point.
+local function hermite_param_nearest(base_edge, x, y)
+	local best_param, best_distance = 0, math.huge
+	local low, high, steps = 0, 1, HERMITE_SEARCH_STEPS
+	for _ = 1, HERMITE_SEARCH_PASSES do
+		for step = 0, steps do
+			local t = low + (high - low) * step / steps
+			local point_x, point_y = hermite_point(base_edge, t)
+			local distance = (point_x - x) ^ 2 + (point_y - y) ^ 2
+			if distance < best_distance then best_param, best_distance = t, distance end
+		end
+		local span = (high - low) / steps
+		low, high = math.max(best_param - span, 0), math.min(best_param + span, 1)
+	end
+	return best_param
+end
+
+edge_param_for_position = function(edge_entity, base_edge, relative_position)
+	local succeeded, param = pcall(function()
+		local sections, total_length = edge_sections(edge_entity)
+		if not sections or not base_edge.position0 or not base_edge.tangent0 then return nil end
+		local point = point_on_edge(sections, total_length, relative_position)
+		return hermite_param_nearest(base_edge, point.x, point.y)
+	end)
+	if succeeded and param then return param end
+	if not succeeded then debug_message("edge %s: curve parameter failed, using arc fraction: %s", tostring(edge_entity), tostring(param)) end
+	return relative_position
 end
 
 local function is_track_edge(edge_entity, base_edge)
@@ -720,6 +765,7 @@ local function plan_double_track_steps(references, is_marker_left, excluded_edge
 		end
 		local margin = match and MIN_EDGE_MARGIN_METERS / match.length
 		if match and match.relative_position > margin and match.relative_position < 1 - margin then
+			debug_message("double track: neighbour on edge %s at %.4f (lateral %.2f): %s", tostring(match.edge), match.relative_position, match.lateral, table.concat(notes, "; "))
 			local step = steps_by_edge[match.edge]
 			if not step then
 				step = {
@@ -1053,6 +1099,11 @@ local function run_job(job, defer_placement)
 	local name = marker_name(edge_object.params)
 	api.cmd.sendCommand(api.cmd.makeEntitySetNameCmd(job.marker, name, true))
 	debug_message("job %d: named marker %s '%s'", job.id, tostring(job.marker), tostring(name))
+	local transf = edge_object.transf
+	if transf then
+		debug_message("job %d: marker %s edge %s world position (%.2f, %.2f, %.2f) param %s", job.id, tostring(job.marker),
+			tostring(api.engine.system.streetSystem.getEdgeForEdgeObject(job.marker)), transf[13] or 0, transf[14] or 0, transf[15] or 0, tostring(edge_object.param))
+	end
 	local is_single = not job.distance
 	if is_single and not double_track_from_params(edge_object.params) then return end
 	local value_step = job.distance and job.distance / 100 or 1
