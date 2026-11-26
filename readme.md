@@ -45,7 +45,7 @@ Bugs oder Features können auf GitHub oder Mod.io gemeldet werden.
 
 ### Changelog
 
-- **v1.1.0 (Rev2)** (19.04.2026)<br />
+- **v1.1.0 (Rev2)** (19.11.2026)<br />
   - Texturen wurden einheitlich auf 1024<br />
     angepasst<br />
   - Unvorhergesehener Konflikt beim Auto-<br />

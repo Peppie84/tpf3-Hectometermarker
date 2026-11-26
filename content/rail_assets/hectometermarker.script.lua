@@ -13,6 +13,9 @@ local STONE_840X480_DIGIT_SCALE = 1.4 * STONE_840X480_SCALE
 local STONE_840X480_DIGIT_FRONT_X = 0.155 * STONE_840X480_SCALE
 -- Rückseite: Hektometer-Ziffer sitzt wegen der unregelmäßigen Steinfläche 5,6 mm weiter außen
 local STONE_840X480_HECTOMETER_BACK_X = 0.162 * STONE_840X480_SCALE
+-- Hektometer-Ziffer (unten) auf beiden Seiten 2 mm weiter außen, damit sie nicht in den Stein clippt und flackert
+local STONE_840X480_HECTOMETER_CLEARANCE = 0.002
+local STONE_840X480_HECTOMETER_FRONT_X = STONE_840X480_DIGIT_FRONT_X + STONE_840X480_HECTOMETER_CLEARANCE
 local STONE_840X480_DIGIT_PAIR_HALF_GAP = 0.09 * STONE_840X480_SCALE
 local STONE_840X480_TOP_Z = 0.89 * STONE_840X480_SCALE + STONE_840X480_HEIGHT_ADJUSTMENT
 local STONE_840X480_BOTTOM_Z = 0.51 * STONE_840X480_SCALE + STONE_840X480_HEIGHT_ADJUSTMENT
@@ -254,8 +257,8 @@ local function build_stone_840x480(params)
     append_pair(models, first_digit_index == NEGATIVE_FIRST_DIGIT_INDEX and NEGATIVE_SIGN or first_digit,
         second_digit, STONE_840X480_DIGIT_FRONT_X, offset, STONE_840X480_TOP_Z + height, STONE_840X480_DIGIT_PAIR_HALF_GAP,
         is_double_sided, -STONE_840X480_DIGIT_FRONT_X, STONE_840X480_DIGIT_SCALE)
-    append_digit(models, hectometer_digit, STONE_840X480_DIGIT_FRONT_X, offset, STONE_840X480_BOTTOM_Z + height, is_double_sided,
-        -STONE_840X480_HECTOMETER_BACK_X, offset, STONE_840X480_DIGIT_SCALE)
+    append_digit(models, hectometer_digit, STONE_840X480_HECTOMETER_FRONT_X, offset, STONE_840X480_BOTTOM_Z + height, is_double_sided,
+        -(STONE_840X480_HECTOMETER_BACK_X + STONE_840X480_HECTOMETER_CLEARANCE), offset, STONE_840X480_DIGIT_SCALE)
     return models
 end
 
