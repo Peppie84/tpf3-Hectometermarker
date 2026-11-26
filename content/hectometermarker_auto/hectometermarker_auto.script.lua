@@ -1,6 +1,8 @@
 local AUTO_KEY = "peppie84_hmt_auto"
 local SPACING_KEY = "peppie84_hmt_auto_spacing"
 local STOP_AT_KEY = "peppie84_hmt_auto_stop_at"
+local DOUBLE_TRACK_KEY = "peppie84_hmt_auto_double_track"
+local SIDE_KEY = "peppie84_hmt_side"
 local MODEL_KEY = "peppie84_hmt_model_type"
 local FIRST_DIGIT_KEY = "peppie84_hmt_first_digit"
 local SECOND_DIGIT_KEY = "peppie84_hmt_second_digit"
@@ -20,7 +22,7 @@ local METER_MODEL_TYPES = { [1] = true, [2] = true, [3] = true, [4] = true, [6] 
 local METER_DISPLAY_ON_INDEX = 2
 local NEGATIVE_FIRST_INDEX = 2
 local FIRST_DIGIT_INDEX_OFFSET = 2
-local SPACING_METERS = { 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000 }
+local SPACING_METERS = { 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 50 }
 local DEFAULT_SPACING_INDEX = 1
 local STOP_TARGET_SWITCH = 2
 local STOP_TARGET_TUNNEL = 3
@@ -32,19 +34,41 @@ local STOP_TARGET_REASONS = {
 	[STOP_TARGET_STATION] = "target station",
 	[STOP_TARGET_BRIDGE] = "target bridge",
 }
+local DOUBLE_TRACK_OFF_INDEX = 1
+local DOUBLE_TRACK_ON_INDEX = 2
+local LEFT_SIDE_INDEX = 1
+local NEIGHBOUR_SEARCH_RADIUS = 12
+local NEIGHBOUR_MIN_DISTANCE = 2
+local NEIGHBOUR_MAX_DISTANCE = 9
+local NEIGHBOUR_MAX_HEIGHT_DIFFERENCE = 3
+local NEIGHBOUR_MAX_ALONG_OFFSET = 1.5
+local NEIGHBOUR_MIN_PARALLEL = 0.9
+local NEIGHBOUR_LOCATE_STEPS = 40
+local NEIGHBOUR_REFINE_STEPS = 8
+local unpack_values = table.unpack or unpack
 local VALUE_EPSILON = 1e-9
 local TANGENT_TIE_EPSILON = 1e-3
 local MAX_SHIFT_METERS = 15
 local SHIFT_STEP_METERS = 15
 local MIN_EDGE_MARGIN_METERS = 0.5
+local REPLACE_TOLERANCE_METERS = 2
+local HERMITE_SEARCH_STEPS = 50
+local HERMITE_SEARCH_PASSES = 4
 local PROGRESS_KEY = "peppie84_hmt_auto_progress"
 local PROGRESS_STEP_PERCENT = 10
 local PROGRESS_VALIDATION_SHARE = 60
 local PROGRESS_FILTER_SHARE = 35
 local PROGRESS_MIN_MARKERS = 30
 
+-- Set to true to also log per-node, per-marker and per-edge details when debugging.
+local DEBUG_LOG = false
+
 local function log_message(message)
 	debugPrint("[hectometermarker_auto] " .. tostring(message))
+end
+
+local function debug_message(format, ...)
+	if DEBUG_LOG then log_message(string.format(format, ...)) end
 end
 
 local function combo_box_index(raw_value, default_index)
@@ -132,6 +156,7 @@ local function params_for_value(base_params, value, shift_meters)
 	local new_params = {}
 	for key, param_value in pairs(base_params) do new_params[key] = param_value end
 	new_params[AUTO_KEY] = 1
+	new_params[DOUBLE_TRACK_KEY] = DOUBLE_TRACK_OFF_INDEX
 	if shift_meters and shift_meters ~= 0 and is_meter_display_on(base_params) then
 		local shifted_meter
 		value, shifted_meter = shift_meters_in_value(base_params, value, shift_meters)
@@ -172,6 +197,10 @@ local function stop_target_from_params(params)
 	if type(params) ~= "table" then return nil end
 	local stop_target = combo_box_index(params[STOP_AT_KEY], 1)
 	return STOP_TARGET_REASONS[stop_target] and stop_target or nil
+end
+
+local function double_track_from_params(params)
+	return type(params) == "table" and params[DOUBLE_TRACK_KEY] == DOUBLE_TRACK_ON_INDEX
 end
 
 local function is_hectometer_marker(entity)
@@ -275,8 +304,8 @@ local function pick_straightest_edge(candidates, node, last_edge)
 			if outgoing_x ~= nil then
 				local alignment = incoming_x * outgoing_x + incoming_y * outgoing_y
 				local chord = chord_alignment(candidate_base_edge, node, incoming_x, incoming_y)
-				log_message(string.format("node %s: from edge %s (%.2f, %.2f) candidate edge %s (%.2f, %.2f) alignment %.3f, chord %.3f",
-					tostring(node), tostring(last_edge.entity), incoming_x, incoming_y, tostring(candidate), outgoing_x, outgoing_y, alignment, chord))
+				debug_message("node %s: from edge %s (%.2f, %.2f) candidate edge %s (%.2f, %.2f) alignment %.3f, chord %.3f",
+					tostring(node), tostring(last_edge.entity), incoming_x, incoming_y, tostring(candidate), outgoing_x, outgoing_y, alignment, chord)
 				local is_better = alignment > best_alignment + TANGENT_TIE_EPSILON
 					or (alignment > 0 and math.abs(alignment - best_alignment) <= TANGENT_TIE_EPSILON and chord > best_chord)
 				if is_better then best_edge, best_alignment, best_chord = candidate, alignment, chord end
@@ -427,25 +456,75 @@ local function plan_new_markers(marker_entity, distance, max_count, stop_target)
 			}
 		end
 	end
-	return steps
+	local start_reference = nil
+	if edge_length > 0 then
+		start_reference = {
+			edge = edge_entity,
+			relative_position = placed_marker.position / edge_length,
+			is_walked_backward = first_edge.is_backward,
+			step_count = 0,
+			shift_meters = 0,
+		}
+	end
+	return steps, nil, start_reference
+end
+
+-- Single placement without auto: no marker chain, only the start marker as reference for its partner on track B.
+local function plan_start_reference(marker_entity)
+	local edge_entity = api.engine.system.streetSystem.getEdgeForEdgeObject(marker_entity)
+	if not edge_entity or edge_entity < 0 then return nil, "marker has no edge" end
+	local markers_by_entity, edge_length = find_markers_on_edge(edge_entity)
+	local placed_marker = markers_by_entity[marker_entity]
+	if not placed_marker then return nil, "marker not found in the signal system" end
+	if edge_length <= 0 then return nil, "marker edge has no length" end
+	return {}, nil, {
+		edge = edge_entity,
+		relative_position = placed_marker.position / edge_length,
+		is_walked_backward = placed_marker.is_left,
+		step_count = 0,
+		shift_meters = 0,
+	}
 end
 
 local function try_set_params(new_edge_object, params)
 	return (pcall(function() new_edge_object.params = params end))
 end
 
+-- Defined below next to the other geometry helpers.
+local edge_param_for_position
+
+-- A hectometer marker already standing where a neighbour-track marker is planned (e.g. after replacing the start marker) is replaced.
+local function markers_to_replace(step)
+	local replaced = {}
+	if not step.is_double_track then return replaced end
+	local markers_by_entity, edge_length = find_markers_on_edge(step.edge)
+	for entity, marker in pairs(markers_by_entity) do
+		for _, position in ipairs(step.positions) do
+			if math.abs(marker.position - position.relative_position * edge_length) <= REPLACE_TOLERANCE_METERS then
+				replaced[entity] = true
+			end
+		end
+	end
+	return replaced
+end
+
 local function build_proposal(marker_edge_object, base_params, start_value, value_step, steps)
 	local player = api.engine.util.getPlayer()
 	local all_params_applied = nil
 
-	local edges_to_add, edges_to_remove, edge_objects_to_add = {}, {}, {}
+	local edges_to_add, edges_to_remove, edge_objects_to_add, edge_objects_to_remove = {}, {}, {}, {}
 	local next_placeholder_entity = FIRST_PLACEHOLDER_ENTITY
 	for step_index, step in ipairs(steps) do
 		local base_edge = api.engine.getComponent(step.edge, api.type.ComponentType.BASE_EDGE)
 		if base_edge then
 			local edge_objects = {}
+			local replaced = markers_to_replace(step)
 			for _, object_entry in ipairs(base_edge.objects or {}) do
-				edge_objects[#edge_objects + 1] = { object_entry[1], object_entry[2] }
+				if replaced[object_entry[1]] then
+					edge_objects_to_remove[#edge_objects_to_remove + 1] = object_entry[1]
+				else
+					edge_objects[#edge_objects + 1] = { object_entry[1], object_entry[2] }
+				end
 			end
 			local segment = api.type.SegmentAndEntity.new()
 			segment.entity = -step_index
@@ -458,7 +537,7 @@ local function build_proposal(marker_edge_object, base_params, start_value, valu
 				next_placeholder_entity = next_placeholder_entity - 1
 				local new_edge_object = api.type.SimpleStreetProposal.EdgeObject.new()
 				new_edge_object.edgeEntity = segment.entity
-				new_edge_object.param = position.relative_position
+				new_edge_object.param = edge_param_for_position(step.edge, base_edge, position.relative_position)
 				new_edge_object.oneWay = false
 				new_edge_object.left = step.is_left
 				new_edge_object.model = marker_edge_object.edgeObjectConstruction
@@ -478,6 +557,7 @@ local function build_proposal(marker_edge_object, base_params, start_value, valu
 	proposal.streetProposal.edgesToRemove = edges_to_remove
 	proposal.streetProposal.edgesToAdd = edges_to_add
 	proposal.streetProposal.edgeObjectsToAdd = edge_objects_to_add
+	if #edge_objects_to_remove > 0 then proposal.streetProposal.edgeObjectsToRemove = edge_objects_to_remove end
 	local context = api.type.Context.new()
 	context.player = player
 	return proposal, context, #edge_objects_to_add, all_params_applied
@@ -495,6 +575,224 @@ local function proposal_errors(proposal, context)
 	return #messages > 0 and table.concat(messages, ", ") or "unknown error"
 end
 
+local function geometry_results(...)
+	local results = { ... }
+	if #results == 1 and type(results[1]) == "table" then return unpack_values(results[1]) end
+	return unpack_values(results)
+end
+
+-- calcPos and locate are functions of the EdgeGeometry instance (not of api.type.EdgeGeometry).
+local function geometry_call(geometry, function_name, ...)
+	local method = geometry[function_name]
+	if type(method) ~= "function" then error("EdgeGeometry has no function " .. function_name) end
+	return geometry_results(method(geometry, ...))
+end
+
+local function edge_sections(edge_entity)
+	local transport_network = api.engine.getComponent(edge_entity, api.type.ComponentType.TRANSPORT_NETWORK)
+	if not transport_network then return nil end
+	local sections, total_length = {}, 0
+	for _, network_edge in ipairs(transport_network.edges) do
+		local length = network_edge.geometry.length
+		sections[#sections + 1] = { geometry = network_edge.geometry, start_position = total_length, length = length }
+		total_length = total_length + length
+	end
+	if #sections == 0 or total_length <= 0 then return nil end
+	return sections, total_length
+end
+
+local function point_on_edge(sections, total_length, relative_position)
+	local meters = relative_position * total_length
+	local section = sections[#sections]
+	for _, candidate in ipairs(sections) do
+		if meters <= candidate.start_position + candidate.length then
+			section = candidate
+			break
+		end
+	end
+	local param = section.length > 0 and math.min(math.max((meters - section.start_position) / section.length, 0), 1) or 0
+	return geometry_call(section.geometry, "calcPos", param)
+end
+
+local function hermite_coordinate(t, p0, m0, p1, m1)
+	local t2, t3 = t * t, t * t * t
+	return (2 * t3 - 3 * t2 + 1) * p0 + (t3 - 2 * t2 + t) * m0 + (-2 * t3 + 3 * t2) * p1 + (t3 - t2) * m1
+end
+
+local function hermite_point(base_edge, t)
+	local p0, p1, m0, m1 = base_edge.position0, base_edge.position1, base_edge.tangent0, base_edge.tangent1
+	return hermite_coordinate(t, p0.x, m0.x, p1.x, m1.x), hermite_coordinate(t, p0.y, m0.y, p1.y, m1.y)
+end
+
+-- The param of an edge object is the parameter of the base edge's Hermite curve, not a fraction of the summed
+-- section lengths (those do not necessarily cover the whole base edge). Finds the curve parameter nearest to the point.
+local function hermite_param_nearest(base_edge, x, y)
+	local best_param, best_distance = 0, math.huge
+	local low, high, steps = 0, 1, HERMITE_SEARCH_STEPS
+	for _ = 1, HERMITE_SEARCH_PASSES do
+		for step = 0, steps do
+			local t = low + (high - low) * step / steps
+			local point_x, point_y = hermite_point(base_edge, t)
+			local distance = (point_x - x) ^ 2 + (point_y - y) ^ 2
+			if distance < best_distance then best_param, best_distance = t, distance end
+		end
+		local span = (high - low) / steps
+		low, high = math.max(best_param - span, 0), math.min(best_param + span, 1)
+	end
+	return best_param
+end
+
+edge_param_for_position = function(edge_entity, base_edge, relative_position)
+	local succeeded, param = pcall(function()
+		local sections, total_length = edge_sections(edge_entity)
+		if not sections or not base_edge.position0 or not base_edge.tangent0 then return nil end
+		local point = point_on_edge(sections, total_length, relative_position)
+		return hermite_param_nearest(base_edge, point.x, point.y)
+	end)
+	if succeeded and param then return param end
+	if not succeeded then debug_message("edge %s: curve parameter failed, using arc fraction: %s", tostring(edge_entity), tostring(param)) end
+	return relative_position
+end
+
+local function is_track_edge(edge_entity, base_edge)
+	for _, node in ipairs({ base_edge.node0, base_edge.node1 }) do
+		for _, track_edge in ipairs(api.engine.system.streetSystem.getNodeTrackSegments(node) or {}) do
+			if track_edge == edge_entity then return true end
+		end
+	end
+	return false
+end
+
+-- Nearest point of a candidate edge next to the position, accepted only when it lies sideways and runs parallel.
+local function locate_neighbour_on_edge(edge_entity, position, direction_x, direction_y, normal_x, normal_y, notes)
+	local sections, total_length = edge_sections(edge_entity)
+	if not sections then return nil end
+	local world_position = api.type.Vec3f.new(position.x, position.y, position.z)
+	local best_match = nil
+	for section_index, section in ipairs(sections) do
+		local param, found = geometry_call(section.geometry, "locate", world_position, NEIGHBOUR_LOCATE_STEPS, NEIGHBOUR_MAX_DISTANCE)
+		if not found then
+			notes[#notes + 1] = string.format("edge %s/%d: locate found nothing", tostring(edge_entity), section_index)
+		else
+			local point, point_tangent = geometry_call(section.geometry, "calcPos", param)
+			-- locate only returns a coarse parameter, so move along the tangent until the point is abreast of the position.
+			for _ = 1, NEIGHBOUR_REFINE_STEPS do
+				local refine_x, refine_y = planar_direction(point_tangent, false)
+				if refine_x == nil or section.length <= 0 then break end
+				local remaining = (position.x - point.x) * refine_x + (position.y - point.y) * refine_y
+				if math.abs(remaining) < 0.0001 then break end
+				param = math.min(math.max(param + remaining / section.length, 0), 1)
+				point, point_tangent = geometry_call(section.geometry, "calcPos", param)
+			end
+			local offset_x, offset_y = point.x - position.x, point.y - position.y
+			local lateral = offset_x * normal_x + offset_y * normal_y
+			local along = offset_x * direction_x + offset_y * direction_y
+			local tangent_x, tangent_y = planar_direction(point_tangent, false)
+			local is_beside = lateral >= NEIGHBOUR_MIN_DISTANCE and lateral <= NEIGHBOUR_MAX_DISTANCE and math.abs(along) <= NEIGHBOUR_MAX_ALONG_OFFSET
+			local parallel = tangent_x ~= nil and math.abs(tangent_x * direction_x + tangent_y * direction_y) or 0
+			local height_difference = math.abs(point.z - position.z)
+			notes[#notes + 1] = string.format("edge %s/%d: param %.3f lateral %.2f along %.2f parallel %.2f height %.2f", tostring(edge_entity), section_index, param, lateral, along, parallel, height_difference)
+			if tangent_x ~= nil and is_beside
+				and parallel >= NEIGHBOUR_MIN_PARALLEL
+				and height_difference <= NEIGHBOUR_MAX_HEIGHT_DIFFERENCE
+				and (best_match == nil or lateral < best_match.lateral) then
+				best_match = {
+					edge = edge_entity,
+					length = total_length,
+					relative_position = (section.start_position + param * section.length) / total_length,
+					is_walked_backward = tangent_x * direction_x + tangent_y * direction_y < 0,
+					lateral = lateral,
+				}
+			end
+		end
+	end
+	return best_match
+end
+
+-- The neighbour track preferably lies on the side opposite to the marker's side, measured from the counting direction.
+local function find_neighbour_track(reference, is_marker_left, excluded_edges, notes)
+	local sections, total_length = edge_sections(reference.edge)
+	if not sections then return nil end
+	local position, tangent = point_on_edge(sections, total_length, reference.relative_position)
+	local direction_x, direction_y = planar_direction(tangent, reference.is_walked_backward)
+	if direction_x == nil then return nil end
+	local normal_x, normal_y = -direction_y, direction_x
+	if is_marker_left then normal_x, normal_y = direction_y, -direction_x end
+	notes[#notes + 1] = string.format("reference edge %s at %.4f (%.1f, %.1f, %.1f) direction (%.2f, %.2f) normal (%.2f, %.2f)", tostring(reference.edge), reference.relative_position, position.x, position.y, position.z, direction_x, direction_y, normal_x, normal_y)
+	local radius = NEIGHBOUR_SEARCH_RADIUS
+	local height = NEIGHBOUR_MAX_HEIGHT_DIFFERENCE + 2
+	local box = api.type.Box3.new(
+		api.type.Vec3f.new(position.x - radius, position.y - radius, position.z - height),
+		api.type.Vec3f.new(position.x + radius, position.y + radius, position.z + height))
+	local candidates = {}
+	api.engine.system.octreeSystem.findIntersectingEntities(box, function(entity) candidates[#candidates + 1] = entity end)
+	notes[#notes + 1] = string.format("%d octree entities", #candidates)
+	local track_candidates = {}
+	for _, candidate in ipairs(candidates) do
+		local candidate_edge = not excluded_edges[candidate] and api.engine.getComponent(candidate, api.type.ComponentType.BASE_EDGE)
+		if candidate_edge and is_track_edge(candidate, candidate_edge) and not is_station(candidate) then
+			track_candidates[#track_candidates + 1] = candidate
+		end
+	end
+	-- Outside of the marker's side first (marker stands outside on both tracks); without a track there the neighbour
+	-- lies on the marker's own side and both markers end up between the tracks.
+	for _, side_sign in ipairs({ 1, -1 }) do
+		local best_match = nil
+		for _, candidate in ipairs(track_candidates) do
+			local match = locate_neighbour_on_edge(candidate, position, direction_x, direction_y, normal_x * side_sign, normal_y * side_sign, notes)
+			if match and (best_match == nil or match.lateral < best_match.lateral) then best_match = match end
+		end
+		if best_match then return best_match end
+	end
+	return nil
+end
+
+local function plan_double_track_steps(references, is_marker_left, excluded_edges)
+	local steps, steps_by_edge, found_count = {}, {}, 0
+	for _, reference in ipairs(references) do
+		local notes = {}
+		local succeeded, match = pcall(find_neighbour_track, reference, is_marker_left, excluded_edges, notes)
+		if not succeeded then
+			log_message("double track: neighbour search failed: " .. tostring(match))
+			match = nil
+		end
+		local margin = match and MIN_EDGE_MARGIN_METERS / match.length
+		if match and not (match.relative_position > margin and match.relative_position < 1 - margin) then
+			notes[#notes + 1] = string.format("neighbour on edge %s at %.4f rejected: too close to the edge end", tostring(match.edge), match.relative_position)
+		end
+		if not match or not (match.relative_position > margin and match.relative_position < 1 - margin) then
+			debug_message("double track: no neighbour: %s", table.concat(notes, "; "))
+		end
+		local margin = match and MIN_EDGE_MARGIN_METERS / match.length
+		if match and match.relative_position > margin and match.relative_position < 1 - margin then
+			debug_message("double track: neighbour on edge %s at %.4f (lateral %.2f): %s", tostring(match.edge), match.relative_position, match.lateral, table.concat(notes, "; "))
+			local step = steps_by_edge[match.edge]
+			if not step then
+				step = {
+					edge = match.edge,
+					is_left = not match.is_walked_backward,
+					length = match.length,
+					is_walked_backward = match.is_walked_backward,
+					is_double_track = true,
+					positions = {},
+				}
+				steps_by_edge[match.edge] = step
+				steps[#steps + 1] = step
+			end
+			local base_shift = reference.shift_meters or 0
+			step.positions[#step.positions + 1] = {
+				relative_position = match.relative_position,
+				step_count = reference.step_count,
+				shift_meters = base_shift,
+				base_shift = base_shift,
+			}
+			found_count = found_count + 1
+		end
+	end
+	log_message(string.format("double track: %d neighbour markers on %d edges, %d left out without a neighbour track", found_count, #steps, #references - found_count))
+	return steps
+end
+
 local function shifted_position(step, position, shift_meters)
 	if shift_meters == 0 then return position end
 	if not step.length or step.length <= 0 then return nil end
@@ -502,7 +800,12 @@ local function shifted_position(step, position, shift_meters)
 	local relative_position = position.relative_position + direction * shift_meters / step.length
 	local margin = MIN_EDGE_MARGIN_METERS / step.length
 	if relative_position <= margin or relative_position >= 1 - margin then return nil end
-	return { relative_position = relative_position, step_count = position.step_count, shift_meters = shift_meters }
+	return {
+		relative_position = relative_position,
+		step_count = position.step_count,
+		shift_meters = shift_meters + (position.base_shift or 0),
+		base_shift = position.base_shift,
+	}
 end
 
 local function shift_candidates(base_shift)
@@ -513,7 +816,7 @@ local function shift_candidates(base_shift)
 	return candidates
 end
 
-local function new_placement(marker_entity, steps, value_step)
+local function new_placement(marker_entity, steps, value_step, start_reference, is_single)
 	local marker_edge_object = api.engine.getComponent(marker_entity, api.type.ComponentType.EDGE_OBJECT)
 	local base_params = {}
 	for key, value in pairs(type(marker_edge_object.params) == "table" and marker_edge_object.params or {}) do
@@ -523,6 +826,8 @@ local function new_placement(marker_entity, steps, value_step)
 		marker = marker_entity,
 		steps = steps,
 		value_step = value_step,
+		start_reference = start_reference,
+		is_single = is_single,
 		base_params = base_params,
 		start_value = value_from_params(base_params),
 		carries_shift = is_meter_display_on(base_params),
@@ -534,7 +839,39 @@ local function new_placement(marker_entity, steps, value_step)
 end
 
 local function step_with_positions(step, positions)
-	return { edge = step.edge, is_left = step.is_left, length = step.length, is_walked_backward = step.is_walked_backward, positions = positions }
+	return {
+		edge = step.edge,
+		is_left = step.is_left,
+		length = step.length,
+		is_walked_backward = step.is_walked_backward,
+		is_double_track = step.is_double_track,
+		positions = positions,
+	}
+end
+
+-- Appends the steps on the neighbour track, derived from the final positions on the marker's own track.
+local function append_double_track_steps(placement)
+	local references, excluded_edges = {}, {}
+	if placement.start_reference then
+		references[1] = placement.start_reference
+		excluded_edges[placement.start_reference.edge] = true
+	end
+	for _, step in ipairs(placement.steps) do excluded_edges[step.edge] = true end
+	for _, step in ipairs(placement.buildable_steps) do
+		for _, position in ipairs(step.positions) do
+			references[#references + 1] = {
+				edge = step.edge,
+				relative_position = position.relative_position,
+				is_walked_backward = step.is_walked_backward,
+				step_count = position.step_count,
+				shift_meters = position.shift_meters,
+			}
+		end
+	end
+	local is_marker_left = placement.base_params[SIDE_KEY] == LEFT_SIDE_INDEX
+	local double_track_steps = plan_double_track_steps(references, is_marker_left, excluded_edges)
+	for _, step in ipairs(double_track_steps) do placement.steps[#placement.steps + 1] = step end
+	return #double_track_steps
 end
 
 local function with_candidate(entries, candidate)
@@ -559,14 +896,20 @@ local function advance_placement(placement)
 	end
 
 	local step = placement.steps[placement.step_index]
+	local chains_shift = placement.carries_shift and not (step and step.is_double_track)
 	if placement.phase == "edge" then
 		if not step then
+			if not placement.double_track_planned and double_track_from_params(placement.base_params) then
+				placement.double_track_planned = true
+				if append_double_track_steps(placement) > 0 then return false end
+			end
 			placement.phase = "combined"
 			return false
 		end
+		local entry_shift = chains_shift and placement.current_shift or 0
 		local whole_positions = {}
 		for _, position in ipairs(step.positions) do
-			whole_positions[#whole_positions + 1] = shifted_position(step, position, placement.current_shift)
+			whole_positions[#whole_positions + 1] = shifted_position(step, position, entry_shift)
 		end
 		local whole_step = #whole_positions == #step.positions and step_with_positions(step, whole_positions) or nil
 		local errors = whole_step == nil and "marker outside of the edge" or check_steps({ whole_step })
@@ -576,7 +919,7 @@ local function advance_placement(placement)
 		else
 			placement.edge_errors = errors
 			placement.kept_positions, placement.shift_notes = {}, {}
-			placement.running_shift = placement.current_shift
+			placement.running_shift = entry_shift
 			placement.position_index, placement.candidate_index = 1, 1
 			placement.phase = "shift"
 		end
@@ -586,8 +929,8 @@ local function advance_placement(placement)
 			placement.phase = "reduced"
 			return false
 		end
-		local base_shift = placement.carries_shift and placement.running_shift or 0
-		local candidate_shift = shift_candidates(base_shift)[placement.candidate_index]
+		local base_shift = chains_shift and placement.running_shift or 0
+		local candidate_shift = (placement.is_single and { base_shift } or shift_candidates(base_shift))[placement.candidate_index]
 		if candidate_shift == nil then
 			placement.position_index = placement.position_index + 1
 			placement.candidate_index = 1
@@ -596,7 +939,7 @@ local function advance_placement(placement)
 		local candidate = shifted_position(step, position, candidate_shift)
 		if candidate and not check_steps({ step_with_positions(step, { candidate }) }) then
 			placement.kept_positions[#placement.kept_positions + 1] = candidate
-			if placement.carries_shift then placement.running_shift = candidate_shift end
+			if chains_shift then placement.running_shift = candidate_shift end
 			if candidate_shift ~= 0 then
 				placement.shift_notes[#placement.shift_notes + 1] = string.format("step %d %+d m", position.step_count, candidate_shift)
 			end
@@ -606,14 +949,17 @@ local function advance_placement(placement)
 			placement.candidate_index = placement.candidate_index + 1
 		end
 	elseif placement.phase == "reduced" then
-		if placement.carries_shift then placement.current_shift = placement.running_shift end
+		if chains_shift then placement.current_shift = placement.running_shift end
 		local kept_positions, shift_notes = placement.kept_positions, placement.shift_notes
 		local reduced_step = step_with_positions(step, kept_positions)
 		local is_valid = #kept_positions > 0 and not check_steps({ reduced_step })
-		log_message(string.format("edge %s: %s, kept %d of %d markers%s%s", tostring(step.edge), placement.edge_errors,
+		debug_message("edge %s: %s, kept %d of %d markers%s%s", tostring(step.edge), tostring(placement.edge_errors),
 			is_valid and #kept_positions or 0, #step.positions,
 			#kept_positions > 0 and not is_valid and " (rejected together)" or "",
-			#shift_notes > 0 and (", shifted: " .. table.concat(shift_notes, ", ")) or ""))
+			#shift_notes > 0 and (", shifted: " .. table.concat(shift_notes, ", ")) or "")
+		if placement.is_single and not is_valid then
+			log_message(string.format("double track: no marker on edge %s: %s", tostring(step.edge), tostring(placement.edge_errors)))
+		end
 		if is_valid then placement.buildable_steps[#placement.buildable_steps + 1] = reduced_step end
 		placement.step_index = placement.step_index + 1
 		placement.phase = "edge"
@@ -662,7 +1008,7 @@ local function advance_placement(placement)
 		local candidate_step = step_with_positions(filter_step, with_candidate(placement.kept_positions, position))
 		local errors = check_steps(with_candidate(placement.accepted_steps, candidate_step))
 		if errors then
-			log_message(string.format("edge %s: marker step %d rejected in combined proposal: %s", tostring(filter_step.edge), position.step_count, errors))
+			debug_message("edge %s: marker step %d rejected in combined proposal: %s", tostring(filter_step.edge), position.step_count, tostring(errors))
 		else
 			placement.kept_positions[#placement.kept_positions + 1] = position
 		end
@@ -673,8 +1019,8 @@ local function advance_placement(placement)
 	return false
 end
 
-local function submit_build_proposal(marker_entity, steps, value_step)
-	local placement = new_placement(marker_entity, steps, value_step)
+local function submit_build_proposal(marker_entity, steps, value_step, start_reference, is_single)
+	local placement = new_placement(marker_entity, steps, value_step, start_reference, is_single)
 	while not advance_placement(placement) do end
 end
 
@@ -728,7 +1074,7 @@ local function on_post_build_proposal(event_params, job_state)
 		if edge_object and type(edge_object.params) == "table" and edge_object.params[FIRST_DIGIT_KEY] ~= nil then
 			local distance = distance_from_params(edge_object.params)
 			job_state.jobs[#job_state.jobs + 1] = { id = job_state.next_job_id, marker = marker, distance = distance }
-			log_message("job " .. job_state.next_job_id .. ": marker " .. marker .. ", " .. tostring(distance) .. " m")
+			debug_message("job %d: marker %s, %s m", job_state.next_job_id, tostring(marker), tostring(distance))
 			job_state.next_job_id = job_state.next_job_id + 1
 		end
 	end
@@ -752,16 +1098,27 @@ local function run_job(job, defer_placement)
 	end
 	local name = marker_name(edge_object.params)
 	api.cmd.sendCommand(api.cmd.makeEntitySetNameCmd(job.marker, name, true))
-	log_message("job " .. job.id .. ": named marker " .. job.marker .. " '" .. name .. "'")
-	if not job.distance then return end
-	local value_step = job.distance / 100
-	local max_count = math.floor((max_value(edge_object.params) - value_from_params(edge_object.params)) / value_step + VALUE_EPSILON)
-	local steps, skip_reason = plan_new_markers(job.marker, job.distance, max_count, stop_target_from_params(edge_object.params))
+	debug_message("job %d: named marker %s '%s'", job.id, tostring(job.marker), tostring(name))
+	local transf = edge_object.transf
+	if transf then
+		debug_message("job %d: marker %s edge %s world position (%.2f, %.2f, %.2f) param %s", job.id, tostring(job.marker),
+			tostring(api.engine.system.streetSystem.getEdgeForEdgeObject(job.marker)), transf[13] or 0, transf[14] or 0, transf[15] or 0, tostring(edge_object.param))
+	end
+	local is_single = not job.distance
+	if is_single and not double_track_from_params(edge_object.params) then return end
+	local value_step = job.distance and job.distance / 100 or 1
+	local steps, skip_reason, start_reference
+	if is_single then
+		steps, skip_reason, start_reference = plan_start_reference(job.marker)
+	else
+		local max_count = math.floor((max_value(edge_object.params) - value_from_params(edge_object.params)) / value_step + VALUE_EPSILON)
+		steps, skip_reason, start_reference = plan_new_markers(job.marker, job.distance, max_count, stop_target_from_params(edge_object.params))
+	end
 	if not steps then
 		log_message("job " .. job.id .. " skipped: " .. tostring(skip_reason))
-	elseif #steps > 0 then
-		if defer_placement then return new_placement(job.marker, steps, value_step) end
-		submit_build_proposal(job.marker, steps, value_step)
+	elseif #steps > 0 or (start_reference and double_track_from_params(edge_object.params)) then
+		if defer_placement then return new_placement(job.marker, steps, value_step, start_reference, is_single) end
+		submit_build_proposal(job.marker, steps, value_step, start_reference, is_single)
 	end
 end
 

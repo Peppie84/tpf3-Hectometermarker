@@ -13,6 +13,9 @@ local STONE_840X480_DIGIT_SCALE = 1.4 * STONE_840X480_SCALE
 local STONE_840X480_DIGIT_FRONT_X = 0.155 * STONE_840X480_SCALE
 -- Rückseite: Hektometer-Ziffer sitzt wegen der unregelmäßigen Steinfläche 5,6 mm weiter außen
 local STONE_840X480_HECTOMETER_BACK_X = 0.162 * STONE_840X480_SCALE
+-- Hektometer-Ziffer (unten) auf beiden Seiten 2 mm weiter außen, damit sie nicht in den Stein clippt und flackert
+local STONE_840X480_HECTOMETER_CLEARANCE = 0.002
+local STONE_840X480_HECTOMETER_FRONT_X = STONE_840X480_DIGIT_FRONT_X + STONE_840X480_HECTOMETER_CLEARANCE
 local STONE_840X480_DIGIT_PAIR_HALF_GAP = 0.09 * STONE_840X480_SCALE
 local STONE_840X480_TOP_Z = 0.89 * STONE_840X480_SCALE + STONE_840X480_HEIGHT_ADJUSTMENT
 local STONE_840X480_BOTTOM_Z = 0.51 * STONE_840X480_SCALE + STONE_840X480_HEIGHT_ADJUSTMENT
@@ -21,6 +24,13 @@ local METER_DIGIT_SCALE = 0.175
 local METER_DIGIT_PITCH = 0.0224
 local METER_DIGITS_CENTER_Y_OFFSET = 0.114
 local BOARD_800X480_SCALE_FACTOR = 1.31
+-- Ziffern-Quads (hmt_digits) sind 0,12 x 0,20 m groß und um ihren Ursprung zentriert
+local DIGIT_QUAD_WIDTH = 0.12
+local DIGIT_QUAD_HALF_HEIGHT = 0.1
+
+local SUPPORT_POLE = "pole"
+local SUPPORT_WALL = "wall"
+local SUPPORT_NONE = "none"
 
 -- Maße der Tafel-Familien mit Mast bzw. Haltern. Die Ziffernpositionen sind auf das jeweilige Modell abgestimmt.
 -- negative_sign: Minus als eigenes Zeichen zwischen den Ziffernreihen; fehlt es, ersetzt das Minus die erste Ziffer.
@@ -95,11 +105,38 @@ local BOARD_FAMILIES = {
             center_y_offset = 0.17 * BOARD_800X480_SCALE_FACTOR + 0.02
         },
         mount_center_y_offset = 0.225
+    },
+
+    -- Schmale Tafel (Platte 0,30 x 0,395 m) neben dem Mast, ohne Reflektor und Wandhalter. Die Platte ist beidseitig
+    -- gleich; „Doppelt“ setzt deshalb nur Ziffern auf die Rückseite. Bei Seite „Links“ wird die Baugruppe um 180°
+    -- gedreht, damit die Platte wie bei „Rechts“ auf der Gleisseite des Masts hängt (siehe build_board).
+    -- plate_center_y: Plattenmitte relativ zum Mast; plate_x: Plattenflächen (Rückseite/Vorderseite) im Modell
+    -- inline_meter: Hektometer-Ziffer und zweistellige Meter-Anzeige stehen in einer Zeile (Meter unten bündig);
+    -- ohne Meter-Anzeige steht die Hektometer-Ziffer mittig
+    board_200x300 = {
+        size = "200x300",
+        supports = { SUPPORT_POLE, SUPPORT_NONE },
+        no_reflector = true,
+        fixed_model_prefix = "t",
+        plate_center_y = -0.188166,
+        plate_x = { min = -0.004, max = 0.006 },
+        digit_clearance = 0.002,
+        digit_scale = 0.67,
+        digit_pair_half_gap = 0.048,
+        top_z = 2.333,
+        bottom_z = 2.174,
+        inline_meter = {
+            digit_scale = 0.415,
+            pitch = 0.06,
+            gap = 0.016
+        }
     }
 }
 -- Index 1 = Tief, 2 = Default, 3 = Hoch (nur ohne Mast); Höhenversatz in Metern
 local POLE_HEIGHT_ADJUSTMENTS = { -1.0, 0 }
 local MOUNTED_HEIGHT_ADJUSTMENTS = { -1.0, 0, 1.0 }
+-- Stein (peppie84_hmt_stone_height): Index 1 = Default, 2 = Hoch
+local STONE_HEIGHT_ADJUSTMENTS = { 0, 0.3 }
 
 -- Index 1 = Nein, 2 = Ja
 local NO_INDEX = 1
@@ -108,9 +145,6 @@ local LEFT_INDEX = 1
 local METER_DISPLAY_ON_INDEX = 2
 local AUTO_ON_INDEX = 2
 -- Befestigung (peppie84_hmt_mounting): Index 1 = Mast, 2 = Wand, 3 = Ohne
-local SUPPORT_POLE = "pole"
-local SUPPORT_WALL = "wall"
-local SUPPORT_NONE = "none"
 local MOUNTING_SUPPORTS = { SUPPORT_POLE, SUPPORT_WALL, SUPPORT_NONE }
 
 local PARAM_DEFAULTS = {
@@ -124,6 +158,7 @@ local PARAM_DEFAULTS = {
     peppie84_hmt_reflector = NO_INDEX,
     peppie84_hmt_height = 2,
     peppie84_hmt_height_mounted = 2,
+    peppie84_hmt_stone_height = 1,
     peppie84_hmt_meter_display = 1,
     peppie84_hmt_meter_first_digit = 1,
     peppie84_hmt_meter_second_digit = 1
@@ -216,13 +251,14 @@ local function build_stone_840x480(params)
     local second_digit = decode_other_digit(params.peppie84_hmt_second_digit)
     local hectometer_digit = decode_other_digit(params.peppie84_hmt_hectometer_digit)
     local models = {}
+    local height = STONE_HEIGHT_ADJUSTMENTS[tonumber(params.peppie84_hmt_stone_height) or 1] or 0
 
-    append_model(models, STONE_840X480_MODEL, 0, offset, STONE_840X480_HEIGHT_ADJUSTMENT, false, STONE_840X480_SCALE)
+    append_model(models, STONE_840X480_MODEL, 0, offset, STONE_840X480_HEIGHT_ADJUSTMENT + height, false, STONE_840X480_SCALE)
     append_pair(models, first_digit_index == NEGATIVE_FIRST_DIGIT_INDEX and NEGATIVE_SIGN or first_digit,
-        second_digit, STONE_840X480_DIGIT_FRONT_X, offset, STONE_840X480_TOP_Z, STONE_840X480_DIGIT_PAIR_HALF_GAP,
+        second_digit, STONE_840X480_DIGIT_FRONT_X, offset, STONE_840X480_TOP_Z + height, STONE_840X480_DIGIT_PAIR_HALF_GAP,
         is_double_sided, -STONE_840X480_DIGIT_FRONT_X, STONE_840X480_DIGIT_SCALE)
-    append_digit(models, hectometer_digit, STONE_840X480_DIGIT_FRONT_X, offset, STONE_840X480_BOTTOM_Z, is_double_sided,
-        -STONE_840X480_HECTOMETER_BACK_X, offset, STONE_840X480_DIGIT_SCALE)
+    append_digit(models, hectometer_digit, STONE_840X480_HECTOMETER_FRONT_X, offset, STONE_840X480_BOTTOM_Z + height, is_double_sided,
+        -(STONE_840X480_HECTOMETER_BACK_X + STONE_840X480_HECTOMETER_CLEARANCE), offset, STONE_840X480_DIGIT_SCALE)
     return models
 end
 
@@ -239,15 +275,17 @@ local function param_or_default(params, key)
     return value < 1 and PARAM_DEFAULTS[key] or value
 end
 
-local function support_kind(params)
-    return MOUNTING_SUPPORTS[param_or_default(params, "peppie84_hmt_mounting")] or SUPPORT_POLE
+local function support_kind(params, family)
+    local supports = family and family.supports or MOUNTING_SUPPORTS
+    return supports[param_or_default(params, "peppie84_hmt_mounting")] or SUPPORT_POLE
 end
 
 local function board_variant(family, params)
-    local support = support_kind(params)
+    local support = support_kind(params, family)
     local has_pole = support == SUPPORT_POLE
-    local has_reflector = param_or_default(params, "peppie84_hmt_reflector") == YES_INDEX
-    local name = "hmt_" .. (has_pole and "t" or "tl") .. (has_reflector and "r" or "") .. "_" .. family.size
+    local has_reflector = not family.no_reflector and param_or_default(params, "peppie84_hmt_reflector") == YES_INDEX
+    local prefix = family.fixed_model_prefix or (has_pole and "t" or "tl")
+    local name = "hmt_" .. prefix .. (has_reflector and "r" or "") .. "_" .. family.size
     local path = name .. "/" .. name
     return {
         board_model = path .. "_board",
@@ -258,6 +296,28 @@ local function board_variant(family, params)
     }
 end
 
+-- Hektometer-Ziffer und optionale Meter-Anzeige in einer Zeile: Die Gruppe steht mittig, die kleineren Meter-Ziffern
+-- sitzen rechts neben der Hektometer-Ziffer und schließen unten mit ihr ab. Ohne Meter-Ziffern steht die Hektometer-Ziffer mittig.
+local function append_inline_meter_row(models, family, hectometer_digit, meter_digits, x, center_y, row_z, is_double_sided,
+                                       reverse_x)
+    local row = family.inline_meter
+    local large_width = DIGIT_QUAD_WIDTH * family.digit_scale
+    local small_width = DIGIT_QUAD_WIDTH * row.digit_scale
+    local group_width = large_width
+    if #meter_digits > 0 then
+        group_width = large_width + row.gap + (#meter_digits - 1) * row.pitch + small_width
+    end
+    local left = center_y - group_width / 2
+    append_digit(models, hectometer_digit, x, left + large_width / 2, row_z, is_double_sided, reverse_x, center_y,
+        family.digit_scale)
+    local baseline = row_z - DIGIT_QUAD_HALF_HEIGHT * family.digit_scale
+    for index, digit in ipairs(meter_digits) do
+        local digit_y = left + large_width + row.gap + small_width / 2 + (index - 1) * row.pitch
+        append_digit(models, digit, x, digit_y, baseline + DIGIT_QUAD_HALF_HEIGHT * row.digit_scale, is_double_sided,
+            reverse_x, center_y, row.digit_scale)
+    end
+end
+
 local function build_board(family, params)
     local offset = params.peppie84_hmt_distance
     local is_double_sided = params.peppie84_hmt_double_sided == 2
@@ -265,13 +325,25 @@ local function build_board(family, params)
     local height = variant.has_pole and POLE_HEIGHT_ADJUSTMENTS[params.peppie84_hmt_height]
         or MOUNTED_HEIGHT_ADJUSTMENTS[params.peppie84_hmt_height_mounted]
     local front_x = variant.digit_front_x
+    local back_x = front_x and -front_x
+    -- Bei Familien mit Platte neben dem Mast wird die Baugruppe bei „Links“ gedreht (Platte bleibt auf der Gleisseite);
+    -- die Ziffern der Vorderseite liegen dann auf der Seite +x des gedrehten Modells
+    local is_assembly_rotated = family.plate_center_y ~= nil and params.peppie84_hmt_side == LEFT_INDEX
+    local digits_center_y = offset
+    if family.plate_center_y then
+        digits_center_y = offset + (is_assembly_rotated and -family.plate_center_y or family.plate_center_y)
+        local plate_x_min = is_assembly_rotated and -family.plate_x.max or family.plate_x.min
+        local plate_x_max = is_assembly_rotated and -family.plate_x.min or family.plate_x.max
+        front_x = plate_x_max + family.digit_clearance
+        back_x = plate_x_min - family.digit_clearance
+    end
     local first_digit_index = params.peppie84_hmt_first_digit
     local is_negative = first_digit_index == NEGATIVE_FIRST_DIGIT_INDEX
     local first_digit = decode_first_digit(first_digit_index)
     local second_digit = (family.has_third_digit and decode_optional_digit or decode_other_digit)(params.peppie84_hmt_second_digit)
     local hectometer_digit = decode_other_digit(params.peppie84_hmt_hectometer_digit)
     local models = {}
-    local mount_shift = 2 * family.mount_center_y_offset
+    local mount_shift = 2 * (family.mount_center_y_offset or 0)
     local support_y = offset
     if variant.support == SUPPORT_WALL and params.peppie84_hmt_side == LEFT_INDEX then
         support_y = offset - mount_shift
@@ -279,8 +351,8 @@ local function build_board(family, params)
     if variant.support_model then
         append_model(models, variant.support_model, 0, support_y, height, false)
     end
-    append_model(models, variant.board_model, 0, offset, height, false)
-    if is_double_sided then
+    append_model(models, variant.board_model, 0, offset, height, is_assembly_rotated)
+    if is_double_sided and not family.plate_center_y then
         append_model(models, variant.board_model, 0, offset, height, true)
         if variant.support == SUPPORT_WALL then
             append_model(models, variant.support_model, 0, support_y + mount_shift, height, true)
@@ -295,23 +367,35 @@ local function build_board(family, params)
     local top_z = family.top_z + height
     if family.has_third_digit then
         append_triple(models, row_first_digit, second_digit, decode_other_digit(params.peppie84_hmt_third_digit), front_x,
-            offset, top_z, 2 * family.digit_pair_half_gap, is_double_sided, -front_x, family.digit_scale)
+            digits_center_y, top_z, 2 * family.digit_pair_half_gap, is_double_sided, back_x, family.digit_scale)
     else
-        append_pair(models, row_first_digit, second_digit, front_x, offset, top_z, family.digit_pair_half_gap,
-            is_double_sided, -front_x, family.digit_scale)
+        append_pair(models, row_first_digit, second_digit, front_x, digits_center_y, top_z, family.digit_pair_half_gap,
+            is_double_sided, back_x, family.digit_scale)
     end
-    append_digit(models, hectometer_digit, front_x, offset, family.bottom_z + height, is_double_sided, -front_x,
-        offset, family.digit_scale)
+    if family.inline_meter then
+        local meter_digits = {}
+        if params.peppie84_hmt_meter_display == METER_DISPLAY_ON_INDEX then
+            meter_digits = {
+                decode_other_digit(params.peppie84_hmt_meter_first_digit),
+                decode_other_digit(params.peppie84_hmt_meter_second_digit)
+            }
+        end
+        append_inline_meter_row(models, family, hectometer_digit, meter_digits, front_x, digits_center_y,
+            family.bottom_z + height, is_double_sided, back_x)
+        return models
+    end
+    append_digit(models, hectometer_digit, front_x, digits_center_y, family.bottom_z + height, is_double_sided, back_x,
+        digits_center_y, family.digit_scale)
     if is_negative and negative_sign then
-        append_digit(models, NEGATIVE_SIGN, front_x, offset - negative_sign.y_offset, negative_sign.z + height,
-            is_double_sided, -front_x, offset, family.digit_scale)
+        append_digit(models, NEGATIVE_SIGN, front_x, digits_center_y - negative_sign.y_offset, negative_sign.z + height,
+            is_double_sided, back_x, digits_center_y, family.digit_scale)
     end
     if params.peppie84_hmt_meter_display == METER_DISPLAY_ON_INDEX then
         append_meter_display(models, family.meter, {
             hectometer_digit,
             decode_other_digit(params.peppie84_hmt_meter_first_digit),
             decode_other_digit(params.peppie84_hmt_meter_second_digit)
-        }, front_x, offset, family.meter.z + height, is_double_sided, -front_x)
+        }, front_x, digits_center_y, family.meter.z + height, is_double_sided, back_x)
     end
     return models
 end

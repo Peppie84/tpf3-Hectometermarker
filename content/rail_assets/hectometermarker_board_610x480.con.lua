@@ -15,10 +15,14 @@ for digit = 0, 9 do
     second_digit_values[#second_digit_values+1] = tostring(digit)
 end
 
+-- Entwicklungsschalter: true blendet im Abstands-Slider zusätzlich 50 m ein (letzter Eintrag), für kurze Testabstände. Vor einem Release auf false setzen.
+local DEV_SHORT_SPACING = false
+
 local auto_spacing_values = {}
 for meters = 100, 1000, 100 do
     auto_spacing_values[#auto_spacing_values+1] = meters .. " m"
 end
+if DEV_SHORT_SPACING then auto_spacing_values[#auto_spacing_values+1] = "50 m" end
 
 function data()
     return {
@@ -205,6 +209,14 @@ function data()
                 displayMode = "Horizontal",
                 values = { translate("peppie84_hmt_left"), translate("peppie84_hmt_right") },
                 defaultIndex = 2
+            },
+            {
+                key = "peppie84_hmt_auto_double_track",
+                name = translate("peppie84_hmt_auto_double_track_name"),
+                tooltip = translate("peppie84_hmt_auto_double_track_tooltip"),
+                displayMode = "Horizontal",
+                values = { translate("peppie84_hmt_no"), translate("peppie84_hmt_yes") },
+                defaultIndex = 1
             },
             {
                 key = "peppie84_hmt_auto",
